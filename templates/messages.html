@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Messages (channel {{ default_channel }})</h1>
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th class="nowrap">Time</th>
+        <th>From</th>
+        <th>Message</th>
+        <th class="nowrap">RSSI / SNR</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if messages %}
+        {% for msg in messages %}
+        <tr>
+          <td class="nowrap">{{ msg.rx_time | datetime }}</td>
+          <td>
+            {{ msg.short_name or msg.long_name or msg.from_id or "-" }}
+            {% if msg.from_id %}<div class="muted">{{ msg.from_id }}</div>{% endif %}
+          </td>
+          <td>
+            {% if msg.text %}
+              {{ msg.text }}
+            {% else %}
+              <span class="tag">{{ msg.portnum or "unknown" }}</span>
+            {% endif %}
+          </td>
+          <td class="nowrap">{{ msg.rx_rssi | value }} / {{ msg.rx_snr | value }}</td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="4" class="muted">No messages yet.</td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Meshapp</title>
+  <style>
+    :root {
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --text: #1b1f2a;
+      --muted: #5c6374;
+      --accent: #2f6fed;
+      --border: #e3e6ee;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f6f7fb, #eef1f8 40%, #f6f7fb 100%);
+      color: var(--text);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header .title {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+    nav a {
+      margin-left: 12px;
+      text-decoration: none;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    nav a.active {
+      color: var(--accent);
+    }
+    main {
+      max-width: 1100px;
+      margin: 24px auto;
+      padding: 0 20px 40px;
+    }
+    h1 {
+      margin: 0 0 16px;
+      font-size: 22px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 8px 18px rgba(16, 24, 40, 0.06);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    thead th {
+      text-align: left;
+      color: var(--muted);
+      font-weight: 700;
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    tbody td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tbody tr:hover {
+      background: #f4f6fb;
+    }
+    .muted { color: var(--muted); }
+    .nowrap { white-space: nowrap; }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #e9eefc;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    @media (max-width: 700px) {
+      header { flex-direction: column; align-items: flex-start; gap: 8px; }
+      nav a { margin-left: 0; margin-right: 12px; }
+      table { font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">Meshapp</div>
+    <nav>
+      <a href="{{ url_for('messages') }}" class="{% if request.path.startswith('/messages') or request.path == '/' %}active{% endif %}">Messages</a>
+      <a href="{{ url_for('nodes') }}" class="{% if request.path.startswith('/nodes') %}active{% endif %}">Nodes</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
