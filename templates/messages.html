@@ -30,7 +30,7 @@
           <td>
             {% set display_name = msg.long_name or msg.short_name or msg.from_id or "-" %}
             {% set avatar_text_raw = msg.short_name or (msg.long_name[:2] if msg.long_name else (msg.from_id[:2] if msg.from_id else "?")) %}
-            {% set avatar_text = avatar_text_raw[:4] %}
+            {% set avatar_text = avatar_text_raw[:4] | upper %}
             {% set avatar_small = avatar_text | length >= 4 %}
             {% set hover_info = "Node ID: " ~ (msg.from_id or "-") ~ " | Short: " ~ (msg.short_name or "-") ~ " | Long: " ~ (msg.long_name or "-") ~ " | Channel: " ~ (msg.channel_index if msg.channel_index is not none else "-") ~ " | Key: " ~ (msg.channel_key or "-") ~ " | To: " ~ (msg.to_id or "-") ~ " | Port: " ~ (msg.portnum or "-") ~ " | Hops: " ~ (msg.hops if msg.hops is not none else "-") %}
             <span class="node-label hover-info" title="{{ hover_info }}">
@@ -128,7 +128,7 @@
     const displayName = msg.long_name || msg.short_name || msg.from_id || "-";
     const avatarTextRaw = msg.short_name ||
       (msg.long_name ? msg.long_name.slice(0, 2) : (msg.from_id ? msg.from_id.slice(0, 2) : "?"));
-    const avatarText = normalizeAvatarText(avatarTextRaw);
+    const avatarText = normalizeAvatarText(avatarTextRaw).toUpperCase();
     const avatarClass = avatarTextLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
     const channelIndex = msg.channel_index === null || msg.channel_index === undefined ? "-" : msg.channel_index;
     const hopsValue = msg.hops === null || msg.hops === undefined ? "-" : msg.hops;

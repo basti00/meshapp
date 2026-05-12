@@ -24,7 +24,7 @@
           <td>
             {% set display_name = node.long_name or node.short_name or node.node_id %}
             {% set avatar_text_raw = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
-            {% set avatar_text = avatar_text_raw[:4] %}
+            {% set avatar_text = avatar_text_raw[:4] | upper %}
             {% set avatar_small = avatar_text | length >= 4 %}
             {% set hover_info = "Node ID: " ~ (node.node_id or "-") ~ " | Short: " ~ (node.short_name or "-") ~ " | Long: " ~ (node.long_name or "-") ~ " | HW: " ~ (node.hw_model or "-") ~ " | Telemetry total/daily: " ~ (node.telemetry_count_total | value) ~ " / " ~ (node.telemetry_count_daily | value) ~ " | Nodeinfo total/daily: " ~ (node.nodeinfo_count_total | value) ~ " / " ~ (node.nodeinfo_count_daily | value) ~ " | Position total/daily: " ~ (node.position_count_total | value) ~ " / " ~ (node.position_count_daily | value) ~ " | Other total/daily: " ~ (node.other_count_total | value) ~ " / " ~ (node.other_count_daily | value) %}
             <span class="node-label hover-info" title="{{ hover_info }}">
@@ -134,7 +134,7 @@
     const displayName = node.long_name || node.short_name || node.node_id || "-";
     const avatarTextRaw = node.short_name ||
       (node.long_name ? node.long_name.slice(0, 2) : (node.node_id ? node.node_id.slice(0, 2) : "?"));
-    const avatarText = normalizeAvatarText(avatarTextRaw);
+    const avatarText = normalizeAvatarText(avatarTextRaw).toUpperCase();
     const avatarClass = avatarTextLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
     const hoverInfo = `Node ID: ${node.node_id || "-"} | Short: ${node.short_name || "-"} ` +
       `| Long: ${node.long_name || "-"} | HW: ${node.hw_model || "-"} ` +

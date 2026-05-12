@@ -13,11 +13,12 @@
       --accent: #2f6fed;
       --border: #e3e6ee;
       --font-main: "Segoe UI", "Segoe UI Emoji", "Segoe UI Symbol", "Apple Color Emoji", "Noto Color Emoji", "Noto Emoji", sans-serif;
+      --font-avatar: "Segoe UI Emoji", "Segoe UI Symbol", "Segoe UI", "Apple Color Emoji", "Noto Color Emoji", "Noto Emoji", sans-serif;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: var(--font-main);
+      font-family: var(--font-avatar);
       background: linear-gradient(180deg, #f6f7fb, #eef1f8 40%, #f6f7fb 100%);
       color: var(--text);
     }
@@ -110,7 +111,6 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      text-transform: uppercase;
       flex: 0 0 auto;
     }
     .avatar--small {
