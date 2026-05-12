@@ -16,7 +16,7 @@
         <th class="nowrap">Pressure</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody id="nodes-body">
       {% if nodes %}
         {% for node in nodes %}
         <tr>
@@ -24,7 +24,7 @@
           <td>
             {% set display_name = node.long_name or node.short_name or node.node_id %}
             {% set avatar_text = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
-            {% set hover_info = "Node ID: " ~ (node.node_id or "-") ~ " | Short: " ~ (node.short_name or "-") ~ " | Long: " ~ (node.long_name or "-") ~ " | HW: " ~ (node.hw_model or "-") %}
+            {% set hover_info = "Node ID: " ~ (node.node_id or "-") ~ " | Short: " ~ (node.short_name or "-") ~ " | Long: " ~ (node.long_name or "-") ~ " | HW: " ~ (node.hw_model or "-") ~ " | Telemetry total/daily: " ~ (node.telemetry_count_total | value) ~ " / " ~ (node.telemetry_count_daily | value) ~ " | Nodeinfo total/daily: " ~ (node.nodeinfo_count_total | value) ~ " / " ~ (node.nodeinfo_count_daily | value) ~ " | Position total/daily: " ~ (node.position_count_total | value) ~ " / " ~ (node.position_count_daily | value) %}
             <span class="node-label hover-info" title="{{ hover_info }}">
               <span class="avatar">{{ avatar_text }}</span>
               <span class="node-name">{{ display_name }}</span>
@@ -47,4 +47,122 @@
     </tbody>
   </table>
 </div>
+<script>
+  const refreshSeconds = {{ auto_refresh_seconds or 0 }};
+  const tbody = document.getElementById("nodes-body");
+  const UNITS = {
+    voltage: "V",
+    battery: "%",
+    temperature: "°C",
+    humidity: "%hr",
+    pressure: "mbar",
+  };
+
+  function pad(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function formatTime(epochSeconds) {
+    if (epochSeconds === null || epochSeconds === undefined) {
+      return "-";
+    }
+    const numeric = Number(epochSeconds);
+    if (!numeric) {
+      return "-";
+    }
+    const date = new Date(numeric * 1000);
+    if (Number.isNaN(date.getTime())) {
+      return "-";
+    }
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+      `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+
+  function formatValue(value, digits = 2) {
+    if (value === null || value === undefined) {
+      return "-";
+    }
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue)) {
+      return String(value);
+    }
+    if (Number.isInteger(numberValue)) {
+      return String(numberValue);
+    }
+    return numberValue.toFixed(digits);
+  }
+
+  function formatValueUnit(value, unit, digits = 2) {
+    const formatted = formatValue(value, digits);
+    if (formatted === "-") {
+      return formatted;
+    }
+    return `${formatted} ${unit}`;
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function buildNodeRow(node) {
+    const displayName = node.long_name || node.short_name || node.node_id || "-";
+    const avatarText = node.short_name ||
+      (node.long_name ? node.long_name.slice(0, 2) : (node.node_id ? node.node_id.slice(0, 2) : "?"));
+    const hoverInfo = `Node ID: ${node.node_id || "-"} | Short: ${node.short_name || "-"} ` +
+      `| Long: ${node.long_name || "-"} | HW: ${node.hw_model || "-"} ` +
+      `| Telemetry total/daily: ${formatValue(node.telemetry_count_total)} / ${formatValue(node.telemetry_count_daily)} ` +
+      `| Nodeinfo total/daily: ${formatValue(node.nodeinfo_count_total)} / ${formatValue(node.nodeinfo_count_daily)} ` +
+      `| Position total/daily: ${formatValue(node.position_count_total)} / ${formatValue(node.position_count_daily)}`;
+
+    return `
+      <tr>
+        <td class="nowrap">${formatTime(node.last_seen)}</td>
+        <td>
+          <span class="node-label hover-info" title="${escapeHtml(hoverInfo)}">
+            <span class="avatar">${escapeHtml(avatarText)}</span>
+            <span class="node-name">${escapeHtml(displayName)}</span>
+          </span>
+        </td>
+        <td class="nowrap">${formatTime(node.last_ping)}</td>
+        <td class="nowrap">${formatValue(node.last_hops)}</td>
+        <td class="nowrap">${formatValueUnit(node.battery_voltage, UNITS.voltage)}</td>
+        <td class="nowrap">${formatValueUnit(node.battery_level, UNITS.battery)}</td>
+        <td class="nowrap">${formatValueUnit(node.temperature, UNITS.temperature)}</td>
+        <td class="nowrap">${formatValueUnit(node.humidity, UNITS.humidity)}</td>
+        <td class="nowrap">${formatValueUnit(node.pressure, UNITS.pressure)}</td>
+      </tr>
+    `;
+  }
+
+  async function refreshNodes() {
+    if (!tbody) {
+      return;
+    }
+    try {
+      const response = await fetch("/api/nodes", { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const payload = await response.json();
+      const nodes = payload.nodes || [];
+      if (!nodes.length) {
+        tbody.innerHTML = '<tr><td colspan="9" class="muted">No nodes yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = nodes.map(buildNodeRow).join("");
+    } catch (error) {
+      console.warn("Failed to refresh nodes", error);
+    }
+  }
+
+  if (refreshSeconds && refreshSeconds > 0) {
+    setInterval(refreshNodes, refreshSeconds * 1000);
+  }
+  refreshNodes();
+</script>
 {% endblock %}

@@ -7,11 +7,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, redirect, render_template, url_for
+from flask import Flask, jsonify, redirect, render_template, url_for
 from meshtastic.serial_interface import SerialInterface
 from pubsub import pub
 
-DB_SCHEMA_VERSION = 2
+DB_SCHEMA_VERSION = 3
 DB_PATH = Path(__file__).with_name("meshapp.db")
 DEVICE_PATH = os.environ.get("MESH_DEVICE", "/dev/ttyACM0")
 DEFAULT_CHANNEL_INDEX = int(os.environ.get("MESH_CHANNEL", "0"))
@@ -69,6 +69,13 @@ def _format_value_unit(value, unit, digits=2):
     if formatted == "-":
         return formatted
     return f"{formatted} {unit}"
+
+
+def _local_day(value):
+    if not value:
+        return datetime.now().astimezone().strftime("%Y-%m-%d")
+    dt = datetime.fromtimestamp(int(value), tz=timezone.utc).astimezone()
+    return dt.strftime("%Y-%m-%d")
 
 
 def _coerce_int(value):
@@ -138,7 +145,14 @@ def init_db():
                 humidity REAL,
                 pressure REAL,
                 telemetry_json TEXT,
-                position_json TEXT
+                position_json TEXT,
+                non_message_day TEXT,
+                telemetry_count_total INTEGER DEFAULT 0,
+                telemetry_count_daily INTEGER DEFAULT 0,
+                nodeinfo_count_total INTEGER DEFAULT 0,
+                nodeinfo_count_daily INTEGER DEFAULT 0,
+                position_count_total INTEGER DEFAULT 0,
+                position_count_daily INTEGER DEFAULT 0
             )
             """
         )
@@ -173,6 +187,57 @@ def _insert_message(**message):
     with _db_connect() as conn:
         conn.execute(sql, list(message.values()))
         conn.commit()
+
+
+def _get_non_message_counts(node_id):
+    with _db_connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                non_message_day,
+                telemetry_count_total,
+                telemetry_count_daily,
+                nodeinfo_count_total,
+                nodeinfo_count_daily,
+                position_count_total,
+                position_count_daily
+            FROM nodes
+            WHERE node_id = ?
+            """,
+            (node_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def _build_non_message_updates(current_day, counts, increment_type):
+    day_changed = counts is None or counts.get("non_message_day") != current_day
+    if not day_changed and increment_type is None:
+        return {}
+
+    totals = {
+        "telemetry": int(counts.get("telemetry_count_total") or 0) if counts else 0,
+        "nodeinfo": int(counts.get("nodeinfo_count_total") or 0) if counts else 0,
+        "position": int(counts.get("position_count_total") or 0) if counts else 0,
+    }
+    daily = {
+        "telemetry": int(counts.get("telemetry_count_daily") or 0) if counts and not day_changed else 0,
+        "nodeinfo": int(counts.get("nodeinfo_count_daily") or 0) if counts and not day_changed else 0,
+        "position": int(counts.get("position_count_daily") or 0) if counts and not day_changed else 0,
+    }
+
+    if increment_type in totals:
+        totals[increment_type] += 1
+        daily[increment_type] += 1
+
+    return {
+        "non_message_day": current_day,
+        "telemetry_count_total": totals["telemetry"],
+        "telemetry_count_daily": daily["telemetry"],
+        "nodeinfo_count_total": totals["nodeinfo"],
+        "nodeinfo_count_daily": daily["nodeinfo"],
+        "position_count_total": totals["position"],
+        "position_count_daily": daily["position"],
+    }
 
 
 def _extract_portnum(decoded):
@@ -321,6 +386,25 @@ def _extract_position(decoded):
     return None
 
 
+def _classify_non_message(message_text, portnum, telemetry, position, nodeinfo):
+    if message_text:
+        return None
+    if telemetry:
+        return "telemetry"
+    if position:
+        return "position"
+    if nodeinfo:
+        return "nodeinfo"
+    port_label = str(portnum).upper() if portnum else ""
+    if "TELEMETRY" in port_label:
+        return "telemetry"
+    if "POSITION" in port_label:
+        return "position"
+    if "NODEINFO" in port_label:
+        return "nodeinfo"
+    return None
+
+
 def _extract_sensor_values(telemetry):
     if not isinstance(telemetry, dict):
         return {}
@@ -353,24 +437,34 @@ def handle_packet(packet, interface=None):
         to_id = str(to_id)
 
     message_text = _extract_text(decoded, portnum)
+    if isinstance(message_text, str):
+        message_text = message_text.strip()
+        if not message_text:
+            message_text = None
 
-    _insert_message(
-        rx_time=rx_time,
-        channel_index=channel_index,
-        channel_key=channel_key,
-        from_id=from_id,
-        to_id=to_id,
-        hops=hops,
-        portnum=str(portnum) if portnum else None,
-        text=message_text,
-        rx_rssi=packet.get("rxRssi"),
-        rx_snr=packet.get("rxSnr"),
-        decoded_json=_json_dumps(decoded),
-        raw_json=_json_dumps(packet),
-    )
+    nodeinfo = _extract_nodeinfo(decoded)
+    telemetry = _extract_telemetry(decoded)
+    position = _extract_position(decoded)
+    non_message_type = _classify_non_message(message_text, portnum, telemetry, position, nodeinfo)
+
+    if message_text:
+        _insert_message(
+            rx_time=rx_time,
+            channel_index=channel_index,
+            channel_key=channel_key,
+            from_id=from_id,
+            to_id=to_id,
+            hops=hops,
+            portnum=str(portnum) if portnum else None,
+            text=message_text,
+            rx_rssi=packet.get("rxRssi"),
+            rx_snr=packet.get("rxSnr"),
+            decoded_json=_json_dumps(decoded),
+            raw_json=_json_dumps(packet),
+        )
 
     updates = {"last_seen": rx_time}
-    updates.update({k: v for k, v in _extract_nodeinfo(decoded).items() if v is not None})
+    updates.update({k: v for k, v in nodeinfo.items() if v is not None})
     updates.update(
         {k: v for k, v in _extract_nodeinfo_from_interface(interface, from_id).items() if v is not None}
     )
@@ -380,16 +474,19 @@ def handle_packet(packet, interface=None):
     if portnum and any(keyword in str(portnum).upper() for keyword in PING_KEYWORDS):
         updates["last_ping"] = rx_time
 
-    telemetry = _extract_telemetry(decoded)
     if telemetry:
         updates["last_telemetry"] = rx_time
         updates["telemetry_json"] = _json_dumps(telemetry)
         updates.update({k: v for k, v in _extract_sensor_values(telemetry).items() if v is not None})
 
-    position = _extract_position(decoded)
     if position:
         updates["last_position"] = rx_time
         updates["position_json"] = _json_dumps(position)
+
+    if from_id:
+        counts = _get_non_message_counts(from_id)
+        current_day = _local_day(rx_time)
+        updates.update(_build_non_message_updates(current_day, counts, non_message_type))
 
     _upsert_node(from_id, **updates)
 
@@ -489,6 +586,36 @@ def _render_messages(channel_key, channels):
     )
 
 
+@app.route("/api/messages/<channel_key>")
+def messages_api(channel_key):
+    with _db_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                m.rx_time,
+                m.channel_index,
+                m.channel_key,
+                m.from_id,
+                m.to_id,
+                m.hops,
+                m.portnum,
+                m.text,
+                m.rx_rssi,
+                m.rx_snr,
+                n.short_name,
+                n.long_name
+            FROM messages m
+            LEFT JOIN nodes n ON n.node_id = m.from_id
+            WHERE m.channel_key = ?
+            ORDER BY m.rx_time DESC
+            LIMIT 500
+            """,
+            (channel_key,),
+        ).fetchall()
+    messages_list = [dict(row) for row in rows]
+    return jsonify({"messages": messages_list})
+
+
 @app.route("/messages")
 def messages_default():
     channels = _get_available_channels()
@@ -520,6 +647,38 @@ def nodes():
         nodes=node_list,
         auto_refresh_seconds=AUTO_REFRESH_SECONDS,
     )
+
+
+@app.route("/api/nodes")
+def nodes_api():
+    with _db_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                node_id,
+                short_name,
+                long_name,
+                hw_model,
+                last_seen,
+                last_ping,
+                last_hops,
+                battery_level,
+                battery_voltage,
+                temperature,
+                humidity,
+                pressure,
+                telemetry_count_total,
+                telemetry_count_daily,
+                nodeinfo_count_total,
+                nodeinfo_count_daily,
+                position_count_total,
+                position_count_daily
+            FROM nodes
+            ORDER BY last_seen DESC
+            """
+        ).fetchall()
+    node_list = [dict(row) for row in rows]
+    return jsonify({"nodes": node_list})
 
 
 app.jinja_env.filters["datetime"] = _format_time

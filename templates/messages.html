@@ -4,7 +4,7 @@
 {% if channels %}
   <div class="channel-tabs">
     {% for channel in channels %}
-      {% set channel_label = "Channel " ~ (channel.channel_index if channel.channel_index is not none else "?") %}
+      {% set channel_label = "Channel " ~ (channel.channel_index if channel.channel_index is not none else (channel.channel_key or "?")) %}
       <a href="{{ url_for('messages_channel', channel_key=channel.channel_key) }}" class="{% if channel.channel_key == current_channel.channel_key %}active{% endif %}" title="Key: {{ channel.channel_key }}">
         {{ channel_label }}
       </a>
@@ -22,7 +22,7 @@
         <th class="nowrap">RSSI / SNR</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody id="messages-body">
       {% if messages %}
         {% for msg in messages %}
         <tr>
@@ -55,4 +55,107 @@
     </tbody>
   </table>
 </div>
+<script>
+  const refreshSeconds = {{ auto_refresh_seconds or 0 }};
+  const channelKey = {{ current_channel.channel_key | tojson }};
+  const tbody = document.getElementById("messages-body");
+
+  function pad(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function formatTime(epochSeconds) {
+    if (epochSeconds === null || epochSeconds === undefined) {
+      return "-";
+    }
+    const numeric = Number(epochSeconds);
+    if (!numeric) {
+      return "-";
+    }
+    const date = new Date(numeric * 1000);
+    if (Number.isNaN(date.getTime())) {
+      return "-";
+    }
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+      `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+
+  function formatValue(value, digits = 2) {
+    if (value === null || value === undefined) {
+      return "-";
+    }
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue)) {
+      return String(value);
+    }
+    if (Number.isInteger(numberValue)) {
+      return String(numberValue);
+    }
+    return numberValue.toFixed(digits);
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function buildMessageRow(msg) {
+    const displayName = msg.long_name || msg.short_name || msg.from_id || "-";
+    const avatarText = msg.short_name ||
+      (msg.long_name ? msg.long_name.slice(0, 2) : (msg.from_id ? msg.from_id.slice(0, 2) : "?"));
+    const channelIndex = msg.channel_index === null || msg.channel_index === undefined ? "-" : msg.channel_index;
+    const hopsValue = msg.hops === null || msg.hops === undefined ? "-" : msg.hops;
+    const hoverInfo = `Node ID: ${msg.from_id || "-"} | Short: ${msg.short_name || "-"} | Long: ${msg.long_name || "-"} ` +
+      `| Channel: ${channelIndex} | Key: ${msg.channel_key || "-"} | To: ${msg.to_id || "-"} ` +
+      `| Port: ${msg.portnum || "-"} | Hops: ${hopsValue}`;
+    const messageBody = msg.text
+      ? escapeHtml(msg.text)
+      : `<span class="tag">${escapeHtml(msg.portnum || "unknown")}</span>`;
+
+    return `
+      <tr>
+        <td class="nowrap">${formatTime(msg.rx_time)}</td>
+        <td>
+          <span class="node-label hover-info" title="${escapeHtml(hoverInfo)}">
+            <span class="avatar">${escapeHtml(avatarText)}</span>
+            <span class="node-name">${escapeHtml(displayName)}</span>
+          </span>
+        </td>
+        <td>${messageBody}</td>
+        <td class="nowrap">${formatValue(msg.hops)}</td>
+        <td class="nowrap">${formatValue(msg.rx_rssi)} / ${formatValue(msg.rx_snr)}</td>
+      </tr>
+    `;
+  }
+
+  async function refreshMessages() {
+    if (!tbody || channelKey === null || channelKey === undefined) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/messages/${encodeURIComponent(channelKey)}`, { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const payload = await response.json();
+      const messages = payload.messages || [];
+      if (!messages.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="muted">No messages yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = messages.map(buildMessageRow).join("");
+    } catch (error) {
+      console.warn("Failed to refresh messages", error);
+    }
+  }
+
+  if (refreshSeconds && refreshSeconds > 0) {
+    setInterval(refreshMessages, refreshSeconds * 1000);
+  }
+  refreshMessages();
+</script>
 {% endblock %}
