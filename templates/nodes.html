@@ -22,8 +22,13 @@
         <tr>
           <td class="nowrap">{{ node.last_seen | datetime }}</td>
           <td>
-            {{ node.short_name or node.long_name or node.node_id }}
-            <div class="muted">{{ node.node_id }}</div>
+            {% set display_name = node.long_name or node.short_name or node.node_id %}
+            {% set avatar_text = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
+            {% set hover_info = "Node ID: " ~ (node.node_id or "-") ~ " | Short: " ~ (node.short_name or "-") ~ " | Long: " ~ (node.long_name or "-") ~ " | HW: " ~ (node.hw_model or "-") %}
+            <span class="node-label hover-info" title="{{ hover_info }}">
+              <span class="avatar">{{ avatar_text }}</span>
+              <span class="node-name">{{ display_name }}</span>
+            </span>
           </td>
           <td class="nowrap">{{ node.last_ping | datetime }}</td>
           <td class="nowrap">{{ node.last_hops | value }}</td>

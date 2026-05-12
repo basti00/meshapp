@@ -29,8 +29,12 @@
           <td class="nowrap">{{ msg.rx_time | datetime }}</td>
           <td>
             {% set display_name = msg.long_name or msg.short_name or msg.from_id or "-" %}
-            {% set hover_info = "Node ID: " ~ (msg.from_id or "-") ~ " | Short: " ~ (msg.short_name or "-") ~ " | Channel: " ~ (msg.channel_index if msg.channel_index is not none else "-") ~ " | Key: " ~ (msg.channel_key or "-") ~ " | To: " ~ (msg.to_id or "-") ~ " | Port: " ~ (msg.portnum or "-") %}
-            <span class="hover-info" title="{{ hover_info }}">{{ display_name }}</span>
+            {% set avatar_text = msg.short_name or (msg.long_name[:2] if msg.long_name else (msg.from_id[:2] if msg.from_id else "?")) %}
+            {% set hover_info = "Node ID: " ~ (msg.from_id or "-") ~ " | Short: " ~ (msg.short_name or "-") ~ " | Long: " ~ (msg.long_name or "-") ~ " | Channel: " ~ (msg.channel_index if msg.channel_index is not none else "-") ~ " | Key: " ~ (msg.channel_key or "-") ~ " | To: " ~ (msg.to_id or "-") ~ " | Port: " ~ (msg.portnum or "-") ~ " | Hops: " ~ (msg.hops if msg.hops is not none else "-") %}
+            <span class="node-label hover-info" title="{{ hover_info }}">
+              <span class="avatar">{{ avatar_text }}</span>
+              <span class="node-name">{{ display_name }}</span>
+            </span>
           </td>
           <td>
             {% if msg.text %}
