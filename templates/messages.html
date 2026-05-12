@@ -169,9 +169,15 @@
       const messages = payload.messages || [];
       if (!messages.length) {
         tbody.innerHTML = '<tr><td colspan="5" class="muted">No messages yet.</td></tr>';
+        if (window.renderEmoji) {
+          window.renderEmoji(tbody);
+        }
         return;
       }
       tbody.innerHTML = messages.map(buildMessageRow).join("");
+      if (window.renderEmoji) {
+        window.renderEmoji(tbody);
+      }
     } catch (error) {
       console.warn("Failed to refresh messages", error);
     }

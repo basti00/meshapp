@@ -177,9 +177,15 @@
       const nodes = payload.nodes || [];
       if (!nodes.length) {
         tbody.innerHTML = '<tr><td colspan="9" class="muted">No nodes yet.</td></tr>';
+        if (window.renderEmoji) {
+          window.renderEmoji(tbody);
+        }
         return;
       }
       tbody.innerHTML = nodes.map(buildNodeRow).join("");
+      if (window.renderEmoji) {
+        window.renderEmoji(tbody);
+      }
     } catch (error) {
       console.warn("Failed to refresh nodes", error);
     }

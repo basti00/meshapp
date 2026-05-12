@@ -116,6 +116,22 @@
     .avatar--small {
       font-size: 10px;
     }
+    img.emoji {
+      height: 1em;
+      width: 1em;
+      margin: 0 0.05em 0 0.1em;
+      vertical-align: -0.1em;
+    }
+    .avatar img.emoji {
+      height: 16px;
+      width: 16px;
+      margin: 0;
+      vertical-align: middle;
+    }
+    .avatar--small img.emoji {
+      height: 14px;
+      width: 14px;
+    }
     .node-name {
       font-weight: 600;
     }
@@ -158,5 +174,17 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+  <script src="https://twemoji.maxcdn.com/v/latest/twemoji.min.js" crossorigin="anonymous"></script>
+  <script>
+    function renderEmoji(root) {
+      if (!window.twemoji) {
+        return;
+      }
+      window.twemoji.parse(root || document.body, { folder: "svg", ext: ".svg" });
+    }
+
+    window.renderEmoji = renderEmoji;
+    window.addEventListener("load", () => renderEmoji());
+  </script>
 </body>
 </html>
