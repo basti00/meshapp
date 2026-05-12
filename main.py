@@ -250,6 +250,57 @@ def _extract_nodeinfo(decoded):
     }
 
 
+def _extract_nodeinfo_from_interface(interface, node_id):
+    if interface is None or not node_id:
+        return {}
+    nodes = getattr(interface, "nodes", None)
+    if not isinstance(nodes, dict):
+        return {}
+
+    keys_to_try = [node_id]
+    if isinstance(node_id, str):
+        stripped = node_id.lstrip("!")
+        if stripped != node_id:
+            keys_to_try.append(stripped)
+        try:
+            keys_to_try.append(int(stripped, 16))
+        except ValueError:
+            pass
+    if isinstance(node_id, int):
+        keys_to_try.append(f"!{node_id:08x}")
+
+    node_meta = None
+    for key in keys_to_try:
+        if key in nodes:
+            node_meta = nodes.get(key)
+            break
+
+    if node_meta is None and isinstance(node_id, str):
+        for key, value in nodes.items():
+            if isinstance(key, str) and key.lower() == node_id.lower():
+                node_meta = value
+                break
+
+    if not isinstance(node_meta, dict):
+        return {}
+
+    user = node_meta.get("user") if isinstance(node_meta.get("user"), dict) else {}
+    return {
+        "short_name": user.get("shortName")
+        or user.get("short_name")
+        or node_meta.get("shortName")
+        or node_meta.get("short_name"),
+        "long_name": user.get("longName")
+        or user.get("long_name")
+        or node_meta.get("longName")
+        or node_meta.get("long_name"),
+        "hw_model": user.get("hwModel")
+        or user.get("hw_model")
+        or node_meta.get("hwModel")
+        or node_meta.get("hw_model"),
+    }
+
+
 def _extract_telemetry(decoded):
     if not isinstance(decoded, dict):
         return None
@@ -284,7 +335,7 @@ def _extract_sensor_values(telemetry):
     }
 
 
-def handle_packet(packet):
+def handle_packet(packet, interface=None):
     if not isinstance(packet, dict):
         return
     decoded = packet.get("decoded") or {}
@@ -320,6 +371,9 @@ def handle_packet(packet):
 
     updates = {"last_seen": rx_time}
     updates.update({k: v for k, v in _extract_nodeinfo(decoded).items() if v is not None})
+    updates.update(
+        {k: v for k, v in _extract_nodeinfo_from_interface(interface, from_id).items() if v is not None}
+    )
     if hops is not None:
         updates["last_hops"] = hops
 
@@ -342,7 +396,7 @@ def handle_packet(packet):
 
 def on_receive(packet, interface):
     try:
-        handle_packet(packet)
+        handle_packet(packet, interface)
     except Exception:
         logging.exception("Failed to handle packet")
 
