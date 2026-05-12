@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Messages (channel {{ default_channel }})</h1>
+<h1>Messages</h1>
+{% if channels %}
+  <div class="channel-tabs">
+    {% for channel in channels %}
+      {% set channel_label = "Channel " ~ (channel.channel_index if channel.channel_index is not none else "?") %}
+      <a href="{{ url_for('messages_channel', channel_key=channel.channel_key) }}" class="{% if channel.channel_key == current_channel.channel_key %}active{% endif %}" title="Key: {{ channel.channel_key }}">
+        {{ channel_label }}
+      </a>
+    {% endfor %}
+  </div>
+{% endif %}
 <div class="card">
   <table>
     <thead>
@@ -8,6 +18,7 @@
         <th class="nowrap">Time</th>
         <th>From</th>
         <th>Message</th>
+        <th class="nowrap">Hops</th>
         <th class="nowrap">RSSI / SNR</th>
       </tr>
     </thead>
@@ -17,8 +28,9 @@
         <tr>
           <td class="nowrap">{{ msg.rx_time | datetime }}</td>
           <td>
-            {{ msg.short_name or msg.long_name or msg.from_id or "-" }}
-            {% if msg.from_id %}<div class="muted">{{ msg.from_id }}</div>{% endif %}
+            {% set display_name = msg.long_name or msg.short_name or msg.from_id or "-" %}
+            {% set hover_info = "Node ID: " ~ (msg.from_id or "-") ~ " | Short: " ~ (msg.short_name or "-") ~ " | Channel: " ~ (msg.channel_index if msg.channel_index is not none else "-") ~ " | Key: " ~ (msg.channel_key or "-") ~ " | To: " ~ (msg.to_id or "-") ~ " | Port: " ~ (msg.portnum or "-") %}
+            <span class="hover-info" title="{{ hover_info }}">{{ display_name }}</span>
           </td>
           <td>
             {% if msg.text %}
@@ -27,12 +39,13 @@
               <span class="tag">{{ msg.portnum or "unknown" }}</span>
             {% endif %}
           </td>
+          <td class="nowrap">{{ msg.hops | value }}</td>
           <td class="nowrap">{{ msg.rx_rssi | value }} / {{ msg.rx_snr | value }}</td>
         </tr>
         {% endfor %}
       {% else %}
         <tr>
-          <td colspan="4" class="muted">No messages yet.</td>
+          <td colspan="5" class="muted">No messages yet.</td>
         </tr>
       {% endif %}
     </tbody>

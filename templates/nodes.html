@@ -8,8 +8,9 @@
         <th class="nowrap">Last Seen</th>
         <th>Node</th>
         <th class="nowrap">Last Ping</th>
-        <th class="nowrap">Battery V</th>
-        <th class="nowrap">Battery %</th>
+        <th class="nowrap">Hops</th>
+        <th class="nowrap">Voltage</th>
+        <th class="nowrap">Battery</th>
         <th class="nowrap">Temp</th>
         <th class="nowrap">Humidity</th>
         <th class="nowrap">Pressure</th>
@@ -25,16 +26,17 @@
             <div class="muted">{{ node.node_id }}</div>
           </td>
           <td class="nowrap">{{ node.last_ping | datetime }}</td>
-          <td class="nowrap">{{ node.battery_voltage | value }}</td>
-          <td class="nowrap">{{ node.battery_level | value }}</td>
-          <td class="nowrap">{{ node.temperature | value }}</td>
-          <td class="nowrap">{{ node.humidity | value }}</td>
-          <td class="nowrap">{{ node.pressure | value }}</td>
+          <td class="nowrap">{{ node.last_hops | value }}</td>
+          <td class="nowrap">{{ node.battery_voltage | value_unit("V") }}</td>
+          <td class="nowrap">{{ node.battery_level | value_unit("%") }}</td>
+          <td class="nowrap">{{ node.temperature | value_unit("°C") }}</td>
+          <td class="nowrap">{{ node.humidity | value_unit("%hr") }}</td>
+          <td class="nowrap">{{ node.pressure | value_unit("mbar") }}</td>
         </tr>
         {% endfor %}
       {% else %}
         <tr>
-          <td colspan="8" class="muted">No nodes yet.</td>
+          <td colspan="9" class="muted">No nodes yet.</td>
         </tr>
       {% endif %}
     </tbody>
