@@ -5,6 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Meshapp</title>
   <style>
+    @font-face {
+      font-family: "Noto Color Emoji";
+      src: url("{{ url_for('static', filename='fonts/NotoColorEmoji.ttf') }}") format("truetype");
+      font-display: swap;
+    }
+
     :root {
       --bg: #f6f7fb;
       --panel: #ffffff;
@@ -12,7 +18,7 @@
       --muted: #5c6374;
       --accent: #2f6fed;
       --border: #e3e6ee;
-      --font-main: "Segoe UI Emoji", "Segoe UI", "Trebuchet MS", "Noto Color Emoji", "Apple Color Emoji", sans-serif;
+      --font-main: "Noto Color Emoji", "Segoe UI Emoji", "Segoe UI", "Trebuchet MS", "Apple Color Emoji", sans-serif;
     }
     * { box-sizing: border-box; }
     body {
@@ -116,22 +122,6 @@
     .avatar--small {
       font-size: 10px;
     }
-    img.emoji {
-      height: 1em;
-      width: 1em;
-      margin: 0 0.05em 0 0.1em;
-      vertical-align: -0.1em;
-    }
-    .avatar img.emoji {
-      height: 16px;
-      width: 16px;
-      margin: 0;
-      vertical-align: middle;
-    }
-    .avatar--small img.emoji {
-      height: 14px;
-      width: 14px;
-    }
     .node-name {
       font-weight: 600;
     }
@@ -174,17 +164,5 @@
   <main>
     {% block content %}{% endblock %}
   </main>
-  <script src="https://twemoji.maxcdn.com/v/latest/twemoji.min.js" crossorigin="anonymous"></script>
-  <script>
-    function renderEmoji(root) {
-      if (!window.twemoji) {
-        return;
-      }
-      window.twemoji.parse(root || document.body, { folder: "svg", ext: ".svg" });
-    }
-
-    window.renderEmoji = renderEmoji;
-    window.addEventListener("load", () => renderEmoji());
-  </script>
 </body>
 </html>
