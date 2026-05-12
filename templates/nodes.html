@@ -24,7 +24,7 @@
           <td>
             {% set display_name = node.long_name or node.short_name or node.node_id %}
             {% set avatar_text = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
-            {% set hover_info = "Node ID: " ~ (node.node_id or "-") ~ " | Short: " ~ (node.short_name or "-") ~ " | Long: " ~ (node.long_name or "-") ~ " | HW: " ~ (node.hw_model or "-") ~ " | Telemetry total/daily: " ~ (node.telemetry_count_total | value) ~ " / " ~ (node.telemetry_count_daily | value) ~ " | Nodeinfo total/daily: " ~ (node.nodeinfo_count_total | value) ~ " / " ~ (node.nodeinfo_count_daily | value) ~ " | Position total/daily: " ~ (node.position_count_total | value) ~ " / " ~ (node.position_count_daily | value) %}
+            {% set hover_info = "Node ID: " ~ (node.node_id or "-") ~ " | Short: " ~ (node.short_name or "-") ~ " | Long: " ~ (node.long_name or "-") ~ " | HW: " ~ (node.hw_model or "-") ~ " | Telemetry total/daily: " ~ (node.telemetry_count_total | value) ~ " / " ~ (node.telemetry_count_daily | value) ~ " | Nodeinfo total/daily: " ~ (node.nodeinfo_count_total | value) ~ " / " ~ (node.nodeinfo_count_daily | value) ~ " | Position total/daily: " ~ (node.position_count_total | value) ~ " / " ~ (node.position_count_daily | value) ~ " | Other total/daily: " ~ (node.other_count_total | value) ~ " / " ~ (node.other_count_daily | value) %}
             <span class="node-label hover-info" title="{{ hover_info }}">
               <span class="avatar">{{ avatar_text }}</span>
               <span class="node-name">{{ display_name }}</span>
@@ -117,7 +117,8 @@
       `| Long: ${node.long_name || "-"} | HW: ${node.hw_model || "-"} ` +
       `| Telemetry total/daily: ${formatValue(node.telemetry_count_total)} / ${formatValue(node.telemetry_count_daily)} ` +
       `| Nodeinfo total/daily: ${formatValue(node.nodeinfo_count_total)} / ${formatValue(node.nodeinfo_count_daily)} ` +
-      `| Position total/daily: ${formatValue(node.position_count_total)} / ${formatValue(node.position_count_daily)}`;
+      `| Position total/daily: ${formatValue(node.position_count_total)} / ${formatValue(node.position_count_daily)} ` +
+      `| Other total/daily: ${formatValue(node.other_count_total)} / ${formatValue(node.other_count_daily)}`;
 
     return `
       <tr>

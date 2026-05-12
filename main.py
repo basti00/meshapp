@@ -11,7 +11,7 @@ from flask import Flask, jsonify, redirect, render_template, url_for
 from meshtastic.serial_interface import SerialInterface
 from pubsub import pub
 
-DB_SCHEMA_VERSION = 3
+DB_SCHEMA_VERSION = 4
 DB_PATH = Path(__file__).with_name("meshapp.db")
 DEVICE_PATH = os.environ.get("MESH_DEVICE", "/dev/ttyACM0")
 DEFAULT_CHANNEL_INDEX = int(os.environ.get("MESH_CHANNEL", "0"))
@@ -152,7 +152,9 @@ def init_db():
                 nodeinfo_count_total INTEGER DEFAULT 0,
                 nodeinfo_count_daily INTEGER DEFAULT 0,
                 position_count_total INTEGER DEFAULT 0,
-                position_count_daily INTEGER DEFAULT 0
+                position_count_daily INTEGER DEFAULT 0,
+                other_count_total INTEGER DEFAULT 0,
+                other_count_daily INTEGER DEFAULT 0
             )
             """
         )
@@ -200,7 +202,9 @@ def _get_non_message_counts(node_id):
                 nodeinfo_count_total,
                 nodeinfo_count_daily,
                 position_count_total,
-                position_count_daily
+                position_count_daily,
+                other_count_total,
+                other_count_daily
             FROM nodes
             WHERE node_id = ?
             """,
@@ -218,11 +222,13 @@ def _build_non_message_updates(current_day, counts, increment_type):
         "telemetry": int(counts.get("telemetry_count_total") or 0) if counts else 0,
         "nodeinfo": int(counts.get("nodeinfo_count_total") or 0) if counts else 0,
         "position": int(counts.get("position_count_total") or 0) if counts else 0,
+        "other": int(counts.get("other_count_total") or 0) if counts else 0,
     }
     daily = {
         "telemetry": int(counts.get("telemetry_count_daily") or 0) if counts and not day_changed else 0,
         "nodeinfo": int(counts.get("nodeinfo_count_daily") or 0) if counts and not day_changed else 0,
         "position": int(counts.get("position_count_daily") or 0) if counts and not day_changed else 0,
+        "other": int(counts.get("other_count_daily") or 0) if counts and not day_changed else 0,
     }
 
     if increment_type in totals:
@@ -237,6 +243,8 @@ def _build_non_message_updates(current_day, counts, increment_type):
         "nodeinfo_count_daily": daily["nodeinfo"],
         "position_count_total": totals["position"],
         "position_count_daily": daily["position"],
+        "other_count_total": totals["other"],
+        "other_count_daily": daily["other"],
     }
 
 
@@ -402,7 +410,7 @@ def _classify_non_message(message_text, portnum, telemetry, position, nodeinfo):
         return "position"
     if "NODEINFO" in port_label:
         return "nodeinfo"
-    return None
+    return "other"
 
 
 def _extract_sensor_values(telemetry):
@@ -672,7 +680,9 @@ def nodes_api():
                 nodeinfo_count_total,
                 nodeinfo_count_daily,
                 position_count_total,
-                position_count_daily
+                position_count_daily,
+                other_count_total,
+                other_count_daily
             FROM nodes
             ORDER BY last_seen DESC
             """
