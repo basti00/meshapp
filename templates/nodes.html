@@ -23,10 +23,12 @@
           <td class="nowrap">{{ node.last_seen | datetime }}</td>
           <td>
             {% set display_name = node.long_name or node.short_name or node.node_id %}
-            {% set avatar_text = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
+            {% set avatar_text_raw = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
+            {% set avatar_text = avatar_text_raw[:4] %}
+            {% set avatar_small = avatar_text | length >= 4 %}
             {% set hover_info = "Node ID: " ~ (node.node_id or "-") ~ " | Short: " ~ (node.short_name or "-") ~ " | Long: " ~ (node.long_name or "-") ~ " | HW: " ~ (node.hw_model or "-") ~ " | Telemetry total/daily: " ~ (node.telemetry_count_total | value) ~ " / " ~ (node.telemetry_count_daily | value) ~ " | Nodeinfo total/daily: " ~ (node.nodeinfo_count_total | value) ~ " / " ~ (node.nodeinfo_count_daily | value) ~ " | Position total/daily: " ~ (node.position_count_total | value) ~ " / " ~ (node.position_count_daily | value) ~ " | Other total/daily: " ~ (node.other_count_total | value) ~ " / " ~ (node.other_count_daily | value) %}
             <span class="node-label hover-info" title="{{ hover_info }}">
-              <span class="avatar"{% if node.avatar_bg or node.avatar_fg %} style="{% if node.avatar_bg %}background: {{ node.avatar_bg }};{% endif %}{% if node.avatar_fg %} color: {{ node.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
+              <span class="avatar{% if avatar_small %} avatar--small{% endif %}"{% if node.avatar_bg or node.avatar_fg %} style="{% if node.avatar_bg %}background: {{ node.avatar_bg }};{% endif %}{% if node.avatar_fg %} color: {{ node.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
               <span class="node-name">{{ display_name }}</span>
             </span>
           </td>
@@ -109,6 +111,14 @@
       .replaceAll("'", "&#39;");
   }
 
+  function avatarTextLength(value) {
+    return Array.from(String(value)).length;
+  }
+
+  function normalizeAvatarText(value) {
+    return Array.from(String(value)).slice(0, 4).join("");
+  }
+
   function buildAvatarStyle(background, foreground) {
     const styles = [];
     if (background) {
@@ -122,8 +132,10 @@
 
   function buildNodeRow(node) {
     const displayName = node.long_name || node.short_name || node.node_id || "-";
-    const avatarText = node.short_name ||
+    const avatarTextRaw = node.short_name ||
       (node.long_name ? node.long_name.slice(0, 2) : (node.node_id ? node.node_id.slice(0, 2) : "?"));
+    const avatarText = normalizeAvatarText(avatarTextRaw);
+    const avatarClass = avatarTextLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
     const hoverInfo = `Node ID: ${node.node_id || "-"} | Short: ${node.short_name || "-"} ` +
       `| Long: ${node.long_name || "-"} | HW: ${node.hw_model || "-"} ` +
       `| Telemetry total/daily: ${formatValue(node.telemetry_count_total)} / ${formatValue(node.telemetry_count_daily)} ` +
@@ -137,7 +149,7 @@
         <td class="nowrap">${formatTime(node.last_seen)}</td>
         <td>
           <span class="node-label hover-info" title="${escapeHtml(hoverInfo)}">
-            <span class="avatar" ${avatarStyle}>${escapeHtml(avatarText)}</span>
+            <span class="${avatarClass}" ${avatarStyle}>${escapeHtml(avatarText)}</span>
             <span class="node-name">${escapeHtml(displayName)}</span>
           </span>
         </td>

@@ -12,11 +12,12 @@
       --muted: #5c6374;
       --accent: #2f6fed;
       --border: #e3e6ee;
+      --font-main: "Segoe UI Emoji", "Segoe UI", "Trebuchet MS", "Noto Color Emoji", "Apple Color Emoji", sans-serif;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Trebuchet MS", "Segoe UI", "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif;
+      font-family: var(--font-main);
       background: linear-gradient(180deg, #f6f7fb, #eef1f8 40%, #f6f7fb 100%);
       color: var(--text);
     }
@@ -105,11 +106,15 @@
       color: var(--accent);
       font-weight: 700;
       font-size: 12px;
+      font-family: var(--font-main);
       display: inline-flex;
       align-items: center;
       justify-content: center;
       text-transform: uppercase;
       flex: 0 0 auto;
+    }
+    .avatar--small {
+      font-size: 10px;
     }
     .node-name {
       font-weight: 600;
