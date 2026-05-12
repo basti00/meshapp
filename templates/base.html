@@ -5,12 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Meshapp</title>
   <style>
-    @font-face {
-      font-family: "Noto Color Emoji";
-      src: url("{{ url_for('static', filename='fonts/NotoColorEmoji.ttf') }}") format("truetype");
-      font-display: swap;
-    }
-
     :root {
       --bg: #f6f7fb;
       --panel: #ffffff;
@@ -18,7 +12,7 @@
       --muted: #5c6374;
       --accent: #2f6fed;
       --border: #e3e6ee;
-      --font-main: "Noto Color Emoji", "Segoe UI Emoji", "Segoe UI", "Trebuchet MS", "Apple Color Emoji", sans-serif;
+      --font-main: "Segoe UI", "Segoe UI Emoji", "Segoe UI Symbol", "Apple Color Emoji", "Noto Color Emoji", "Noto Emoji", sans-serif;
     }
     * { box-sizing: border-box; }
     body {
