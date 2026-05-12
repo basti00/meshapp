@@ -26,7 +26,7 @@
             {% set avatar_text = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
             {% set hover_info = "Node ID: " ~ (node.node_id or "-") ~ " | Short: " ~ (node.short_name or "-") ~ " | Long: " ~ (node.long_name or "-") ~ " | HW: " ~ (node.hw_model or "-") ~ " | Telemetry total/daily: " ~ (node.telemetry_count_total | value) ~ " / " ~ (node.telemetry_count_daily | value) ~ " | Nodeinfo total/daily: " ~ (node.nodeinfo_count_total | value) ~ " / " ~ (node.nodeinfo_count_daily | value) ~ " | Position total/daily: " ~ (node.position_count_total | value) ~ " / " ~ (node.position_count_daily | value) ~ " | Other total/daily: " ~ (node.other_count_total | value) ~ " / " ~ (node.other_count_daily | value) %}
             <span class="node-label hover-info" title="{{ hover_info }}">
-              <span class="avatar">{{ avatar_text }}</span>
+              <span class="avatar"{% if node.avatar_bg or node.avatar_fg %} style="{% if node.avatar_bg %}background: {{ node.avatar_bg }};{% endif %}{% if node.avatar_fg %} color: {{ node.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
               <span class="node-name">{{ display_name }}</span>
             </span>
           </td>
@@ -109,6 +109,17 @@
       .replaceAll("'", "&#39;");
   }
 
+  function buildAvatarStyle(background, foreground) {
+    const styles = [];
+    if (background) {
+      styles.push(`background: ${background}`);
+    }
+    if (foreground) {
+      styles.push(`color: ${foreground}`);
+    }
+    return styles.length ? `style="${styles.join("; ")}"` : "";
+  }
+
   function buildNodeRow(node) {
     const displayName = node.long_name || node.short_name || node.node_id || "-";
     const avatarText = node.short_name ||
@@ -119,13 +130,14 @@
       `| Nodeinfo total/daily: ${formatValue(node.nodeinfo_count_total)} / ${formatValue(node.nodeinfo_count_daily)} ` +
       `| Position total/daily: ${formatValue(node.position_count_total)} / ${formatValue(node.position_count_daily)} ` +
       `| Other total/daily: ${formatValue(node.other_count_total)} / ${formatValue(node.other_count_daily)}`;
+    const avatarStyle = buildAvatarStyle(node.avatar_bg, node.avatar_fg);
 
     return `
       <tr>
         <td class="nowrap">${formatTime(node.last_seen)}</td>
         <td>
           <span class="node-label hover-info" title="${escapeHtml(hoverInfo)}">
-            <span class="avatar">${escapeHtml(avatarText)}</span>
+            <span class="avatar" ${avatarStyle}>${escapeHtml(avatarText)}</span>
             <span class="node-name">${escapeHtml(displayName)}</span>
           </span>
         </td>

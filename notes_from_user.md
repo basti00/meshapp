@@ -6,7 +6,7 @@
 * After finishing all tasks, wait ~10-second before finishing; Check for further tasks or notes in `notes_from_user.md` and do them as well before exiting.
 * When exiting, suggest a commit message for the changes you made, 10 - 20 words max. 
 
-# Task
+# Task 1 (already done, ignore)
 
 Please make the following changes to the project:
 

@@ -95,6 +95,41 @@ def _coerce_str(value):
     return str(value)
 
 
+def _parse_node_num(value):
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.startswith("!"):
+        text = text[1:]
+        base = 16
+    elif text.startswith("0x"):
+        text = text[2:]
+        base = 16
+    else:
+        base = 16 if any(char in text for char in "abcdefABCDEF") else 10
+    try:
+        return int(text, base)
+    except ValueError:
+        return None
+
+
+def _node_avatar_colors(node_id):
+    node_num = _parse_node_num(node_id)
+    if node_num is None:
+        return {"avatar_bg": None, "avatar_fg": None}
+    red = (node_num & 0xFF0000) >> 16
+    green = (node_num & 0x00FF00) >> 8
+    blue = node_num & 0x0000FF
+    brightness = ((red * 0.299) + (green * 0.587) + (blue * 0.114)) / 255
+    foreground = "#000000" if brightness > 0.5 else "#ffffff"
+    background = f"#{red:02x}{green:02x}{blue:02x}"
+    return {"avatar_bg": background, "avatar_fg": foreground}
+
+
 def _db_connect():
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
@@ -584,6 +619,8 @@ def _render_messages(channel_key, channels):
             (channel_key,),
         ).fetchall()
     messages_list = [dict(row) for row in rows]
+    for message in messages_list:
+        message.update(_node_avatar_colors(message.get("from_id")))
     current_channel = _find_channel_info(channels, channel_key)
     return render_template(
         "messages.html",
@@ -621,6 +658,8 @@ def messages_api(channel_key):
             (channel_key,),
         ).fetchall()
     messages_list = [dict(row) for row in rows]
+    for message in messages_list:
+        message.update(_node_avatar_colors(message.get("from_id")))
     return jsonify({"messages": messages_list})
 
 
@@ -650,6 +689,8 @@ def nodes():
             """
         ).fetchall()
     node_list = [dict(row) for row in rows]
+    for node in node_list:
+        node.update(_node_avatar_colors(node.get("node_id")))
     return render_template(
         "nodes.html",
         nodes=node_list,
@@ -688,6 +729,8 @@ def nodes_api():
             """
         ).fetchall()
     node_list = [dict(row) for row in rows]
+    for node in node_list:
+        node.update(_node_avatar_colors(node.get("node_id")))
     return jsonify({"nodes": node_list})
 
 
