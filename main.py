@@ -409,6 +409,26 @@ def _extract_nodeinfo_from_interface(interface, node_id):
     }
 
 
+def _extract_node_id(packet, decoded):
+    if isinstance(packet, dict):
+        for key in ("fromId", "from", "sender", "senderId", "from_id", "sender_id"):
+            value = packet.get(key)
+            if value is not None:
+                return str(value)
+    if isinstance(decoded, dict):
+        for key in ("fromId", "from", "sender", "senderId", "from_id", "sender_id", "node_id", "nodeId"):
+            value = decoded.get(key)
+            if value is not None:
+                return str(value)
+        user = decoded.get("user") or decoded.get("nodeInfo") or decoded.get("nodeinfo")
+        if isinstance(user, dict):
+            for key in ("id", "userId", "nodeId", "node_id", "num"):
+                value = user.get(key)
+                if value is not None:
+                    return str(value)
+    return None
+
+
 def _extract_telemetry(decoded):
     if not isinstance(decoded, dict):
         return None
@@ -472,10 +492,8 @@ def handle_packet(packet, interface=None):
     channel_index, channel_key = _extract_channel_info(packet)
     hops = _extract_hops(packet)
 
-    from_id = packet.get("fromId") or packet.get("from")
+    from_id = _extract_node_id(packet, decoded)
     to_id = packet.get("toId") or packet.get("to")
-    if from_id is not None:
-        from_id = str(from_id)
     if to_id is not None:
         to_id = str(to_id)
 
