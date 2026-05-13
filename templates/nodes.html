@@ -1,15 +1,22 @@
 {% extends "base.html" %}
 {% block title %}Nodes · Meshapp{% endblock %}
 {% block content %}
-<h1>Nodes</h1>
+<div class="page-controls">
+  <h1>Nodes</h1>
+  <label class="sort-control">
+    <span>Sort by</span>
+    <select id="node-sort">
+      <option value="last_seen">Last seen</option>
+      <option value="hops">Hops</option>
+    </select>
+  </label>
+</div>
 <div class="card">
   <div class="table-wrap">
     <table class="responsive-stack">
       <thead>
         <tr>
           <th>Node</th>
-          <th>Hops</th>
-          <th>Battery</th>
           <th>Environment</th>
         </tr>
       </thead>
@@ -20,31 +27,36 @@
           {% set avatar_text_raw = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
           {% set avatar_text = avatar_text_raw[:4] | upper %}
           {% set avatar_small = avatar_text | length >= 4 %}
-          {% set last_seen_label = "Last seen " ~ (node.last_seen | message_time) %}
           {% set live = node.last_seen | is_live %}
-          {% set battery = node | battery_summary %}
+          {% set battery = node.battery_level | battery_info %}
+          {% set subtitle = node | node_subtitle %}
           {% set environment = node | environment_summary %}
           <tr>
             <td class="cell-primary" data-label="Node">
               <button type="button" class="node-button" data-node-id="{{ node.node_id or '' }}">
-                <span class="avatar-wrap">
-                  <span class="avatar{% if avatar_small %} avatar--small{% endif %}"
-                        {% if node.avatar_bg or node.avatar_fg %}style="{% if node.avatar_bg %}background: {{ node.avatar_bg }};{% endif %}{% if node.avatar_fg %} color: {{ node.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
-                  <span class="status-dot{% if live %} status-dot--live{% endif %}" aria-hidden="true"></span>
-                </span>
+                {% if node.last_seen %}<span class="status-dot{% if live %} status-dot--live{% endif %}" aria-hidden="true"></span>{% endif %}
+                <span class="avatar{% if avatar_small %} avatar--small{% endif %}"
+                      {% if node.avatar_bg or node.avatar_fg %}style="{% if node.avatar_bg %}background: {{ node.avatar_bg }};{% endif %}{% if node.avatar_fg %} color: {{ node.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
                 <span class="node-button__text">
-                  <span class="node-name">{{ display_name }}</span>
-                  <span class="node-button__sub">{{ last_seen_label }}</span>
+                  <span class="node-button__primary">
+                    <span class="node-name">{{ display_name }}</span>
+                    {% if battery %}
+                    <span class="battery {{ battery.css_class }}" aria-label="Battery {{ battery.level }}%">
+                      <span class="battery__shell"><span class="battery__fill" style="width: {{ battery.level }}%"></span></span>
+                      <span class="battery__cap"></span>
+                      <span class="battery__label">{{ battery.level }} %</span>
+                    </span>
+                    {% endif %}
+                  </span>
+                  {% if subtitle %}<span class="node-button__sub">{{ subtitle }}</span>{% endif %}
                 </span>
               </button>
             </td>
-            <td class="nowrap{% if node.last_hops is none %} cell-empty{% endif %}" data-label="Hops">{{ node.last_hops | value }}</td>
-            <td class="nowrap{% if not battery %} cell-empty{% endif %}" data-label="Battery">{{ battery or "-" }}</td>
-            <td class="{% if not environment %} cell-empty{% endif %}" data-label="Environment">{{ environment or "-" }}</td>
+            <td class="{% if not environment %}cell-empty{% endif %}" data-label="Environment">{{ environment or "-" }}</td>
           </tr>
           {% endfor %}
         {% else %}
-          <tr><td colspan="4" class="muted">No nodes yet.</td></tr>
+          <tr><td colspan="2" class="muted">No nodes yet.</td></tr>
         {% endif %}
       </tbody>
     </table>
@@ -56,22 +68,27 @@
   (function () {
     const refreshSeconds = {{ auto_refresh_seconds or 0 }};
     const tbody = document.getElementById("nodes-body");
+    const sortSelect = document.getElementById("node-sort");
     const { formatMessageTime, formatValue, renderNodeButton, escapeHtml } = window.MeshApp;
+    const SORT_KEY = "meshapp.nodeSort";
+
+    let sortMode = "last_seen";
+    try {
+      const saved = localStorage.getItem(SORT_KEY);
+      if (saved === "hops" || saved === "last_seen") sortMode = saved;
+    } catch (e) {}
+    if (sortSelect) {
+      sortSelect.value = sortMode;
+      sortSelect.addEventListener("change", function () {
+        sortMode = sortSelect.value;
+        try { localStorage.setItem(SORT_KEY, sortMode); } catch (e) {}
+        refresh();
+      });
+    }
 
     function joinMetrics(parts) {
       const filtered = parts.filter(Boolean);
       return filtered.length ? filtered.join(" · ") : null;
-    }
-
-    function batterySummary(node) {
-      const parts = [];
-      if (node.battery_voltage !== null && node.battery_voltage !== undefined) {
-        parts.push(`${formatValue(node.battery_voltage)} V`);
-      }
-      if (node.battery_level !== null && node.battery_level !== undefined) {
-        parts.push(`${formatValue(node.battery_level)} %`);
-      }
-      return joinMetrics(parts);
     }
 
     function environmentSummary(node) {
@@ -88,6 +105,35 @@
       return joinMetrics(parts);
     }
 
+    function nodeSubtitle(node) {
+      const parts = [];
+      if (node.last_seen) parts.push(`Last seen ${formatMessageTime(node.last_seen)}`);
+      if (node.last_hops !== null && node.last_hops !== undefined) {
+        const label = Number(node.last_hops) === 1 ? "hop" : "hops";
+        parts.push(`${node.last_hops} ${label}`);
+      }
+      return parts.length ? parts.join(" · ") : null;
+    }
+
+    function applySort(nodes) {
+      const copy = nodes.slice();
+      if (sortMode === "hops") {
+        copy.sort(function (a, b) {
+          const ha = a.last_hops, hb = b.last_hops;
+          const aMissing = ha === null || ha === undefined;
+          const bMissing = hb === null || hb === undefined;
+          if (aMissing && bMissing) return (b.last_seen || 0) - (a.last_seen || 0);
+          if (aMissing) return 1;
+          if (bMissing) return -1;
+          if (ha !== hb) return ha - hb;
+          return (b.last_seen || 0) - (a.last_seen || 0);
+        });
+      } else {
+        copy.sort(function (a, b) { return (b.last_seen || 0) - (a.last_seen || 0); });
+      }
+      return copy;
+    }
+
     function buildRow(node) {
       const btn = renderNodeButton({
         node_id: node.node_id,
@@ -96,19 +142,14 @@
         avatar_bg: node.avatar_bg,
         avatar_fg: node.avatar_fg,
         last_seen: node.last_seen,
-        subtitle: `Last seen ${formatMessageTime(node.last_seen)}`,
+        battery_level: node.battery_level,
+        subtitle: nodeSubtitle(node),
       });
-      const hops = node.last_hops;
-      const battery = batterySummary(node);
       const environment = environmentSummary(node);
-      const hopsClass = hops === null || hops === undefined ? "nowrap cell-empty" : "nowrap";
-      const batteryClass = battery ? "nowrap" : "nowrap cell-empty";
       const envClass = environment ? "" : "cell-empty";
       return `
         <tr>
           <td class="cell-primary" data-label="Node">${btn}</td>
-          <td class="${hopsClass}" data-label="Hops">${escapeHtml(formatValue(hops))}</td>
-          <td class="${batteryClass}" data-label="Battery">${escapeHtml(battery || "-")}</td>
           <td class="${envClass}" data-label="Environment">${escapeHtml(environment || "-")}</td>
         </tr>`;
     }
@@ -119,10 +160,10 @@
         const response = await fetch("/api/nodes", { cache: "no-store" });
         if (!response.ok) return;
         const payload = await response.json();
-        const nodes = payload.nodes || [];
+        const nodes = applySort(payload.nodes || []);
         tbody.innerHTML = nodes.length
           ? nodes.map(buildRow).join("")
-          : '<tr><td colspan="4" class="muted">No nodes yet.</td></tr>';
+          : '<tr><td colspan="2" class="muted">No nodes yet.</td></tr>';
       } catch (e) {
         console.warn("Failed to refresh nodes", e);
       }

@@ -86,6 +86,34 @@ def _battery_summary(node):
     return _join_metrics(parts)
 
 
+def _battery_info(level):
+    if level is None:
+        return None
+    try:
+        lvl = int(round(float(level)))
+    except (TypeError, ValueError):
+        return None
+    lvl = max(0, min(lvl, 100))
+    if lvl <= 20:
+        css_class = "battery--low"
+    elif lvl <= 50:
+        css_class = "battery--medium"
+    else:
+        css_class = "battery--high"
+    return {"level": lvl, "css_class": css_class}
+
+
+def _node_subtitle(node):
+    parts = []
+    if node.get("last_seen"):
+        parts.append(f"Last seen {_format_message_time(node['last_seen'])}")
+    hops = node.get("last_hops")
+    if hops is not None:
+        label = "hop" if int(hops) == 1 else "hops"
+        parts.append(f"{int(hops)} {label}")
+    return " · ".join(parts) if parts else None
+
+
 def _environment_summary(node):
     parts = []
     if node.get("temperature") is not None:
@@ -825,6 +853,8 @@ app.jinja_env.filters["value_unit"] = _format_value_unit
 app.jinja_env.filters["is_live"] = _is_live
 app.jinja_env.filters["battery_summary"] = _battery_summary
 app.jinja_env.filters["environment_summary"] = _environment_summary
+app.jinja_env.filters["battery_info"] = _battery_info
+app.jinja_env.filters["node_subtitle"] = _node_subtitle
 
 
 if __name__ == "__main__":

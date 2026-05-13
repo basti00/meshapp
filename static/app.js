@@ -111,25 +111,49 @@
     return ageSeconds >= 0 && ageSeconds <= LIVE_THRESHOLD_SECONDS;
   }
 
+  function batteryInfo(level) {
+    if (level === null || level === undefined) return null;
+    const n = Number(level);
+    if (!Number.isFinite(n)) return null;
+    const lvl = Math.max(0, Math.min(100, Math.round(n)));
+    const cssClass = lvl <= 20 ? "battery--low" : lvl <= 50 ? "battery--medium" : "battery--high";
+    return { level: lvl, cssClass };
+  }
+
+  function renderBattery(level) {
+    const info = batteryInfo(level);
+    if (!info) return "";
+    return `<span class="battery ${info.cssClass}" aria-label="Battery ${info.level}%">` +
+      `<span class="battery__shell"><span class="battery__fill" style="width: ${info.level}%"></span></span>` +
+      `<span class="battery__cap"></span>` +
+      `<span class="battery__label">${info.level} %</span>` +
+      `</span>`;
+  }
+
   function renderNodeButton(opts) {
-    // opts: { node_id, short_name, long_name, avatar_bg, avatar_fg, last_seen?, subtitle?, show_status? }
+    // opts: { node_id, short_name, long_name, avatar_bg, avatar_fg,
+    //         last_seen?, subtitle?, show_status?, battery_level? }
     const name = opts.long_name || opts.short_name || opts.node_id || "-";
     const avatarText = avatarTextFor(opts.short_name, opts.long_name, opts.node_id);
     const cls = avatarLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
     const style = buildAvatarStyle(opts.avatar_bg, opts.avatar_fg);
     const id = opts.node_id ? ` data-node-id="${escapeHtml(opts.node_id)}"` : "";
-    const showStatus = opts.show_status !== false && opts.last_seen !== undefined;
-    const dotClass = showStatus ? `status-dot${isLive(opts.last_seen) ? " status-dot--live" : ""}` : "";
+    const showStatus = opts.show_status !== false && opts.last_seen !== undefined && opts.last_seen !== null;
+    const dotHtml = showStatus
+      ? `<span class="status-dot${isLive(opts.last_seen) ? " status-dot--live" : ""}" aria-hidden="true"></span>`
+      : "";
+    const batteryHtml = renderBattery(opts.battery_level);
     const subtitle = opts.subtitle
       ? `<span class="node-button__sub">${escapeHtml(opts.subtitle)}</span>`
       : "";
-    const avatarHtml = showStatus
-      ? `<span class="avatar-wrap"><span class="${cls}"${style}>${escapeHtml(avatarText)}</span><span class="${dotClass}" aria-hidden="true"></span></span>`
-      : `<span class="${cls}"${style}>${escapeHtml(avatarText)}</span>`;
     return `<button type="button" class="node-button"${id}>` +
-      avatarHtml +
+      dotHtml +
+      `<span class="${cls}"${style}>${escapeHtml(avatarText)}</span>` +
       `<span class="node-button__text">` +
+      `<span class="node-button__primary">` +
       `<span class="node-name">${escapeHtml(name)}</span>` +
+      batteryHtml +
+      `</span>` +
       subtitle +
       `</span>` +
       `</button>`;
@@ -324,6 +348,8 @@
     formatValueUnit,
     escapeHtml,
     renderNodeButton,
+    renderBattery,
+    batteryInfo,
     showNodeModal,
     isLive,
     LIVE_THRESHOLD_SECONDS,

@@ -222,6 +222,13 @@ tbody tr:hover { background: var(--panel-hover); }
   line-height: 1.2;
 }
 
+.node-button__primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .node-button__sub {
   font-size: 11px;
   color: var(--muted);
@@ -229,25 +236,101 @@ tbody tr:hover { background: var(--panel-hover); }
   margin-top: 2px;
 }
 
-.avatar-wrap {
-  position: relative;
+.status-dot {
   flex: 0 0 auto;
-  line-height: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #4a5063;
+  opacity: 0.6;
+  box-shadow: 0 0 0 1px var(--panel);
 }
 
-.status-dot {
-  position: absolute;
-  right: -2px;
-  bottom: -2px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--muted);
-  border: 2px solid var(--panel);
+.status-dot--live {
+  background: #2dbe6b;
+  opacity: 1;
+  box-shadow: 0 0 6px rgba(45, 190, 107, 0.5);
+}
+
+/* battery icon */
+.battery {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.battery__shell {
+  display: inline-flex;
+  align-items: center;
+  width: 22px;
+  height: 11px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  padding: 1px;
   box-sizing: content-box;
 }
 
-.status-dot--live { background: #2dbe6b; }
+.battery__fill {
+  display: block;
+  height: 100%;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.battery__cap {
+  display: inline-block;
+  width: 2px;
+  height: 5px;
+  background: currentColor;
+  border-radius: 0 1px 1px 0;
+  margin-left: 1px;
+}
+
+.battery--low { color: #e9534b; }
+.battery--medium { color: #f0a847; }
+.battery--high { color: #2dbe6b; }
+
+/* sort control */
+.page-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+
+.page-controls h1 { margin: 0; }
+
+.sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.sort-control select {
+  appearance: none;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 28px 6px 10px;
+  font: inherit;
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.sort-control select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .avatar {
   width: 32px;
