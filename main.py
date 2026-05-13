@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import os
@@ -11,7 +12,7 @@ from flask import Flask, jsonify, redirect, render_template, url_for
 from meshtastic.serial_interface import SerialInterface
 from pubsub import pub
 
-DB_SCHEMA_VERSION = 4
+DB_SCHEMA_VERSION = 5
 DB_PATH = Path(__file__).with_name("meshapp.db")
 DEVICE_PATH = os.environ.get("MESH_DEVICE", "/dev/ttyACM0")
 DEFAULT_CHANNEL_INDEX = int(os.environ.get("MESH_CHANNEL", "0"))
@@ -168,6 +169,14 @@ def _coerce_str(value):
     return str(value)
 
 
+def _coerce_b64(value):
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return base64.b64encode(bytes(value)).decode("ascii")
+    return str(value)
+
+
 def _parse_node_num(value):
     if value is None:
         return None
@@ -209,13 +218,58 @@ def _db_connect():
     return conn
 
 
+NODE_COLUMNS = [
+    ("short_name", "TEXT"),
+    ("long_name", "TEXT"),
+    ("hw_model", "TEXT"),
+    ("role", "TEXT"),
+    ("macaddr", "TEXT"),
+    ("public_key", "TEXT"),
+    ("first_seen", "INTEGER"),
+    ("last_seen", "INTEGER"),
+    ("last_ping", "INTEGER"),
+    ("last_hops", "INTEGER"),
+    ("last_telemetry", "INTEGER"),
+    ("last_position", "INTEGER"),
+    ("last_rx_snr", "REAL"),
+    ("last_rx_rssi", "REAL"),
+    ("online_since", "INTEGER"),
+    ("uptime_seconds", "INTEGER"),
+    ("battery_level", "REAL"),
+    ("battery_voltage", "REAL"),
+    ("channel_utilization", "REAL"),
+    ("air_util_tx", "REAL"),
+    ("temperature", "REAL"),
+    ("humidity", "REAL"),
+    ("pressure", "REAL"),
+    ("telemetry_json", "TEXT"),
+    ("position_json", "TEXT"),
+    ("non_message_day", "TEXT"),
+    ("telemetry_count_total", "INTEGER DEFAULT 0"),
+    ("telemetry_count_daily", "INTEGER DEFAULT 0"),
+    ("nodeinfo_count_total", "INTEGER DEFAULT 0"),
+    ("nodeinfo_count_daily", "INTEGER DEFAULT 0"),
+    ("position_count_total", "INTEGER DEFAULT 0"),
+    ("position_count_daily", "INTEGER DEFAULT 0"),
+    ("other_count_total", "INTEGER DEFAULT 0"),
+    ("other_count_daily", "INTEGER DEFAULT 0"),
+]
+
+# Fields that, once set, must not be overwritten by later upserts.
+PRESERVE_IF_EXISTS = {"first_seen"}
+
+
+def _ensure_columns(conn, table, columns):
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for name, decl in columns:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 def init_db():
     with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
-        current_version = conn.execute("PRAGMA user_version;").fetchone()[0]
-        if current_version != DB_SCHEMA_VERSION:
-            conn.execute("DROP TABLE IF EXISTS messages")
-            conn.execute("DROP TABLE IF EXISTS nodes")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS messages (
@@ -235,37 +289,18 @@ def init_db():
             )
             """
         )
+        node_columns_sql = ",\n                ".join(
+            [f"{name} {decl}" for name, decl in NODE_COLUMNS]
+        )
         conn.execute(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS nodes (
                 node_id TEXT PRIMARY KEY,
-                short_name TEXT,
-                long_name TEXT,
-                hw_model TEXT,
-                last_seen INTEGER,
-                last_ping INTEGER,
-                last_hops INTEGER,
-                last_telemetry INTEGER,
-                last_position INTEGER,
-                battery_level REAL,
-                battery_voltage REAL,
-                temperature REAL,
-                humidity REAL,
-                pressure REAL,
-                telemetry_json TEXT,
-                position_json TEXT,
-                non_message_day TEXT,
-                telemetry_count_total INTEGER DEFAULT 0,
-                telemetry_count_daily INTEGER DEFAULT 0,
-                nodeinfo_count_total INTEGER DEFAULT 0,
-                nodeinfo_count_daily INTEGER DEFAULT 0,
-                position_count_total INTEGER DEFAULT 0,
-                position_count_daily INTEGER DEFAULT 0,
-                other_count_total INTEGER DEFAULT 0,
-                other_count_daily INTEGER DEFAULT 0
+                {node_columns_sql}
             )
             """
         )
+        _ensure_columns(conn, "nodes", NODE_COLUMNS)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_channel_key_time ON messages(channel_key, rx_time DESC)"
         )
@@ -279,7 +314,13 @@ def _upsert_node(node_id, **updates):
         return
     columns = ["node_id"] + list(updates.keys())
     placeholders = ", ".join(["?"] * len(columns))
-    update_clause = ", ".join([f"{column}=excluded.{column}" for column in updates.keys()])
+    update_parts = []
+    for column in updates.keys():
+        if column in PRESERVE_IF_EXISTS:
+            update_parts.append(f"{column}=COALESCE(nodes.{column}, excluded.{column})")
+        else:
+            update_parts.append(f"{column}=excluded.{column}")
+    update_clause = ", ".join(update_parts)
     values = [node_id] + list(updates.values())
     sql = (
         f"INSERT INTO nodes ({', '.join(columns)}) VALUES ({placeholders}) "
@@ -428,6 +469,9 @@ def _extract_nodeinfo(decoded):
         "short_name": user.get("shortName") or user.get("short_name"),
         "long_name": user.get("longName") or user.get("long_name"),
         "hw_model": user.get("hwModel") or user.get("hw_model"),
+        "role": _coerce_str(user.get("role")),
+        "macaddr": _coerce_b64(user.get("macaddr") or user.get("macAddr")),
+        "public_key": _coerce_b64(user.get("publicKey") or user.get("public_key")),
     }
 
 
@@ -479,6 +523,16 @@ def _extract_nodeinfo_from_interface(interface, node_id):
         or user.get("hw_model")
         or node_meta.get("hwModel")
         or node_meta.get("hw_model"),
+        "role": _coerce_str(user.get("role") or node_meta.get("role")),
+        "macaddr": _coerce_b64(
+            user.get("macaddr") or user.get("macAddr") or node_meta.get("macaddr")
+        ),
+        "public_key": _coerce_b64(
+            user.get("publicKey")
+            or user.get("public_key")
+            or node_meta.get("publicKey")
+            or node_meta.get("public_key")
+        ),
     }
 
 
@@ -549,6 +603,9 @@ def _extract_sensor_values(telemetry):
     return {
         "battery_level": device.get("batteryLevel") or device.get("battery_level"),
         "battery_voltage": device.get("voltage") or device.get("batteryVoltage") or device.get("battery_voltage"),
+        "channel_utilization": device.get("channelUtilization") or device.get("channel_utilization"),
+        "air_util_tx": device.get("airUtilTx") or device.get("air_util_tx"),
+        "uptime_seconds": device.get("uptimeSeconds") or device.get("uptime_seconds"),
         "temperature": env.get("temperature"),
         "humidity": env.get("relativeHumidity") or env.get("humidity"),
         "pressure": env.get("barometricPressure") or env.get("pressure"),
@@ -597,7 +654,7 @@ def handle_packet(packet, interface=None):
             raw_json=_json_dumps(packet),
         )
 
-    updates = {"last_seen": rx_time}
+    updates = {"last_seen": rx_time, "first_seen": rx_time}
     updates.update({k: v for k, v in nodeinfo.items() if v is not None})
     updates.update(
         {k: v for k, v in _extract_nodeinfo_from_interface(interface, from_id).items() if v is not None}
@@ -605,13 +662,27 @@ def handle_packet(packet, interface=None):
     if hops is not None:
         updates["last_hops"] = hops
 
+    rx_snr = packet.get("rxSnr")
+    if rx_snr is not None:
+        updates["last_rx_snr"] = rx_snr
+    rx_rssi = packet.get("rxRssi")
+    if rx_rssi is not None:
+        updates["last_rx_rssi"] = rx_rssi
+
     if portnum and any(keyword in str(portnum).upper() for keyword in PING_KEYWORDS):
         updates["last_ping"] = rx_time
 
     if telemetry:
         updates["last_telemetry"] = rx_time
         updates["telemetry_json"] = _json_dumps(telemetry)
-        updates.update({k: v for k, v in _extract_sensor_values(telemetry).items() if v is not None})
+        sensor_values = {k: v for k, v in _extract_sensor_values(telemetry).items() if v is not None}
+        updates.update(sensor_values)
+        uptime_seconds = sensor_values.get("uptime_seconds")
+        if uptime_seconds is not None:
+            try:
+                updates["online_since"] = int(rx_time) - int(uptime_seconds)
+            except (TypeError, ValueError):
+                pass
 
     if position:
         updates["last_position"] = rx_time

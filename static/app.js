@@ -61,6 +61,27 @@
     return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()} ${hm}`;
   }
 
+  function formatRelative(epochSeconds) {
+    if (epochSeconds === null || epochSeconds === undefined) return null;
+    const numeric = Number(epochSeconds);
+    if (!numeric) return null;
+    const delta = Math.abs(Date.now() / 1000 - numeric);
+    if (delta < 60) return "<1m";
+    const minutes = Math.floor(delta / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    if (days > 0) return `${days}d ${hours % 24}h`;
+    if (hours > 0) return `${hours}h ${minutes % 60}m`;
+    return `${minutes}m`;
+  }
+
+  function formatTimeWithRelative(epochSeconds) {
+    const abs = formatMessageTime(epochSeconds);
+    if (abs === "-") return "-";
+    const rel = formatRelative(epochSeconds);
+    return rel ? `${abs} (${rel})` : abs;
+  }
+
   function formatValue(value, digits) {
     if (digits === undefined) digits = 2;
     if (value === null || value === undefined || value === "") return "-";
@@ -232,18 +253,27 @@
       row("Node ID", node.node_id) +
       row("Short name", node.short_name) +
       row("Long name", node.long_name) +
-      row("Hardware", node.hw_model);
+      row("Hardware", node.hw_model) +
+      row("Role", node.role) +
+      row("MAC address", node.macaddr) +
+      row("Public key", node.public_key);
 
     const activity =
-      row("Last seen", formatTime(node.last_seen)) +
-      row("Last ping", formatTime(node.last_ping)) +
-      row("Last telemetry", formatTime(node.last_telemetry)) +
-      row("Last position", formatTime(node.last_position)) +
-      row("Last hops", formatValue(node.last_hops));
+      row("First seen", formatTimeWithRelative(node.first_seen)) +
+      row("Last seen", formatTimeWithRelative(node.last_seen)) +
+      row("Online since", formatTimeWithRelative(node.online_since)) +
+      row("Last ping", formatTimeWithRelative(node.last_ping)) +
+      row("Last telemetry", formatTimeWithRelative(node.last_telemetry)) +
+      row("Last position", formatTimeWithRelative(node.last_position)) +
+      row("Last hops", formatValue(node.last_hops)) +
+      row("SNR (last)", formatValue(node.last_rx_snr)) +
+      row("RSSI (last)", formatValueUnit(node.last_rx_rssi, "dBm"));
 
     const sensors =
       row("Battery", formatValueUnit(node.battery_level, "%")) +
       row("Voltage", formatValueUnit(node.battery_voltage, "V")) +
+      row("Channel util", formatValueUnit(node.channel_utilization, "%")) +
+      row("Air util TX", formatValueUnit(node.air_util_tx, "%")) +
       row("Temperature", formatValueUnit(node.temperature, "°C")) +
       row("Humidity", formatValueUnit(node.humidity, "%hr")) +
       row("Pressure", formatValueUnit(node.pressure, "mbar"));
@@ -261,10 +291,14 @@
       const lat = p.latitude ?? p.latitudeI;
       const lon = p.longitude ?? p.longitudeI;
       const alt = p.altitude;
+      const fixTime = p.time ?? p.fixTime;
+      const source = p.locationSource ?? p.location_source;
       position =
         row("Latitude", lat) +
         row("Longitude", lon) +
-        row("Altitude", alt !== undefined ? formatValueUnit(alt, "m") : null);
+        row("Altitude", alt !== undefined ? formatValueUnit(alt, "m") : null) +
+        row("Source", source) +
+        row("Fix time", fixTime ? formatTimeWithRelative(fixTime) : null);
     }
 
     const sections = [
@@ -346,6 +380,8 @@
   window.MeshApp = {
     formatTime,
     formatMessageTime,
+    formatRelative,
+    formatTimeWithRelative,
     formatValue,
     formatValueUnit,
     escapeHtml,
