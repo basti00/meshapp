@@ -17,6 +17,7 @@ DEVICE_PATH = os.environ.get("MESH_DEVICE", "/dev/ttyACM0")
 DEFAULT_CHANNEL_INDEX = int(os.environ.get("MESH_CHANNEL", "0"))
 AUTO_REFRESH_SECONDS = int(os.environ.get("MESH_AUTO_REFRESH", "10"))
 LISTEN_RETRY_SECONDS = 5
+LIVE_THRESHOLD_SECONDS = 90 * 3600
 
 PING_KEYWORDS = ("PING",)
 
@@ -60,6 +61,40 @@ def _format_message_time(value):
     if dt.date() == today:
         return dt.strftime("%H:%M")
     return dt.strftime("%d.%m.%Y %H:%M")
+
+
+def _is_live(value):
+    if not value:
+        return False
+    try:
+        return (time.time() - int(value)) <= LIVE_THRESHOLD_SECONDS
+    except (TypeError, ValueError):
+        return False
+
+
+def _join_metrics(parts):
+    rendered = [p for p in parts if p]
+    return " · ".join(rendered) if rendered else None
+
+
+def _battery_summary(node):
+    parts = []
+    if node.get("battery_voltage") is not None:
+        parts.append(f"{_format_value(node['battery_voltage'])} V")
+    if node.get("battery_level") is not None:
+        parts.append(f"{_format_value(node['battery_level'])} %")
+    return _join_metrics(parts)
+
+
+def _environment_summary(node):
+    parts = []
+    if node.get("temperature") is not None:
+        parts.append(f"{_format_value(node['temperature'])} °C")
+    if node.get("humidity") is not None:
+        parts.append(f"{_format_value(node['humidity'])} %hr")
+    if node.get("pressure") is not None:
+        parts.append(f"{_format_value(node['pressure'])} mbar")
+    return _join_metrics(parts)
 
 
 def _format_value(value, digits=2):
@@ -787,6 +822,9 @@ app.jinja_env.filters["datetime"] = _format_time
 app.jinja_env.filters["message_time"] = _format_message_time
 app.jinja_env.filters["value"] = _format_value
 app.jinja_env.filters["value_unit"] = _format_value_unit
+app.jinja_env.filters["is_live"] = _is_live
+app.jinja_env.filters["battery_summary"] = _battery_summary
+app.jinja_env.filters["environment_summary"] = _environment_summary
 
 
 if __name__ == "__main__":

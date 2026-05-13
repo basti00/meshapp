@@ -101,16 +101,37 @@
     return parts.length ? ` style="${parts.join("; ")}"` : "";
   }
 
+  const LIVE_THRESHOLD_SECONDS = 90 * 3600;
+
+  function isLive(lastSeen) {
+    if (lastSeen === null || lastSeen === undefined) return false;
+    const n = Number(lastSeen);
+    if (!n) return false;
+    const ageSeconds = (Date.now() / 1000) - n;
+    return ageSeconds >= 0 && ageSeconds <= LIVE_THRESHOLD_SECONDS;
+  }
+
   function renderNodeButton(opts) {
-    // opts: { node_id, short_name, long_name, avatar_bg, avatar_fg }
+    // opts: { node_id, short_name, long_name, avatar_bg, avatar_fg, last_seen?, subtitle?, show_status? }
     const name = opts.long_name || opts.short_name || opts.node_id || "-";
     const avatarText = avatarTextFor(opts.short_name, opts.long_name, opts.node_id);
     const cls = avatarLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
     const style = buildAvatarStyle(opts.avatar_bg, opts.avatar_fg);
     const id = opts.node_id ? ` data-node-id="${escapeHtml(opts.node_id)}"` : "";
+    const showStatus = opts.show_status !== false && opts.last_seen !== undefined;
+    const dotClass = showStatus ? `status-dot${isLive(opts.last_seen) ? " status-dot--live" : ""}` : "";
+    const subtitle = opts.subtitle
+      ? `<span class="node-button__sub">${escapeHtml(opts.subtitle)}</span>`
+      : "";
+    const avatarHtml = showStatus
+      ? `<span class="avatar-wrap"><span class="${cls}"${style}>${escapeHtml(avatarText)}</span><span class="${dotClass}" aria-hidden="true"></span></span>`
+      : `<span class="${cls}"${style}>${escapeHtml(avatarText)}</span>`;
     return `<button type="button" class="node-button"${id}>` +
-      `<span class="${cls}"${style}>${escapeHtml(avatarText)}</span>` +
+      avatarHtml +
+      `<span class="node-button__text">` +
       `<span class="node-name">${escapeHtml(name)}</span>` +
+      subtitle +
+      `</span>` +
       `</button>`;
   }
 
@@ -304,5 +325,7 @@
     escapeHtml,
     renderNodeButton,
     showNodeModal,
+    isLive,
+    LIVE_THRESHOLD_SECONDS,
   };
 })();

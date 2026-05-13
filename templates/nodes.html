@@ -7,44 +7,44 @@
     <table class="responsive-stack">
       <thead>
         <tr>
-          <th>Last Seen</th>
           <th>Node</th>
-          <th>Last Ping</th>
           <th>Hops</th>
-          <th>Voltage</th>
           <th>Battery</th>
-          <th>Temp</th>
-          <th>Humidity</th>
-          <th>Pressure</th>
+          <th>Environment</th>
         </tr>
       </thead>
       <tbody id="nodes-body">
         {% if nodes %}
           {% for node in nodes %}
+          {% set display_name = node.long_name or node.short_name or node.node_id %}
+          {% set avatar_text_raw = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
+          {% set avatar_text = avatar_text_raw[:4] | upper %}
+          {% set avatar_small = avatar_text | length >= 4 %}
+          {% set last_seen_label = "Last seen " ~ (node.last_seen | message_time) %}
+          {% set live = node.last_seen | is_live %}
+          {% set battery = node | battery_summary %}
+          {% set environment = node | environment_summary %}
           <tr>
-            <td class="nowrap" data-label="Last Seen">{{ node.last_seen | datetime }}</td>
             <td class="cell-primary" data-label="Node">
-              {% set display_name = node.long_name or node.short_name or node.node_id %}
-              {% set avatar_text_raw = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
-              {% set avatar_text = avatar_text_raw[:4] | upper %}
-              {% set avatar_small = avatar_text | length >= 4 %}
               <button type="button" class="node-button" data-node-id="{{ node.node_id or '' }}">
-                <span class="avatar{% if avatar_small %} avatar--small{% endif %}"
-                      {% if node.avatar_bg or node.avatar_fg %}style="{% if node.avatar_bg %}background: {{ node.avatar_bg }};{% endif %}{% if node.avatar_fg %} color: {{ node.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
-                <span class="node-name">{{ display_name }}</span>
+                <span class="avatar-wrap">
+                  <span class="avatar{% if avatar_small %} avatar--small{% endif %}"
+                        {% if node.avatar_bg or node.avatar_fg %}style="{% if node.avatar_bg %}background: {{ node.avatar_bg }};{% endif %}{% if node.avatar_fg %} color: {{ node.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
+                  <span class="status-dot{% if live %} status-dot--live{% endif %}" aria-hidden="true"></span>
+                </span>
+                <span class="node-button__text">
+                  <span class="node-name">{{ display_name }}</span>
+                  <span class="node-button__sub">{{ last_seen_label }}</span>
+                </span>
               </button>
             </td>
-            <td class="nowrap" data-label="Last Ping">{{ node.last_ping | datetime }}</td>
-            <td class="nowrap" data-label="Hops">{{ node.last_hops | value }}</td>
-            <td class="nowrap" data-label="Voltage">{{ node.battery_voltage | value_unit("V") }}</td>
-            <td class="nowrap" data-label="Battery">{{ node.battery_level | value_unit("%") }}</td>
-            <td class="nowrap" data-label="Temp">{{ node.temperature | value_unit("°C") }}</td>
-            <td class="nowrap" data-label="Humidity">{{ node.humidity | value_unit("%hr") }}</td>
-            <td class="nowrap" data-label="Pressure">{{ node.pressure | value_unit("mbar") }}</td>
+            <td class="nowrap{% if node.last_hops is none %} cell-empty{% endif %}" data-label="Hops">{{ node.last_hops | value }}</td>
+            <td class="nowrap{% if not battery %} cell-empty{% endif %}" data-label="Battery">{{ battery or "-" }}</td>
+            <td class="{% if not environment %} cell-empty{% endif %}" data-label="Environment">{{ environment or "-" }}</td>
           </tr>
           {% endfor %}
         {% else %}
-          <tr><td colspan="9" class="muted">No nodes yet.</td></tr>
+          <tr><td colspan="4" class="muted">No nodes yet.</td></tr>
         {% endif %}
       </tbody>
     </table>
@@ -56,7 +56,37 @@
   (function () {
     const refreshSeconds = {{ auto_refresh_seconds or 0 }};
     const tbody = document.getElementById("nodes-body");
-    const { formatTime, formatValue, formatValueUnit, renderNodeButton } = window.MeshApp;
+    const { formatMessageTime, formatValue, renderNodeButton, escapeHtml } = window.MeshApp;
+
+    function joinMetrics(parts) {
+      const filtered = parts.filter(Boolean);
+      return filtered.length ? filtered.join(" · ") : null;
+    }
+
+    function batterySummary(node) {
+      const parts = [];
+      if (node.battery_voltage !== null && node.battery_voltage !== undefined) {
+        parts.push(`${formatValue(node.battery_voltage)} V`);
+      }
+      if (node.battery_level !== null && node.battery_level !== undefined) {
+        parts.push(`${formatValue(node.battery_level)} %`);
+      }
+      return joinMetrics(parts);
+    }
+
+    function environmentSummary(node) {
+      const parts = [];
+      if (node.temperature !== null && node.temperature !== undefined) {
+        parts.push(`${formatValue(node.temperature)} °C`);
+      }
+      if (node.humidity !== null && node.humidity !== undefined) {
+        parts.push(`${formatValue(node.humidity)} %hr`);
+      }
+      if (node.pressure !== null && node.pressure !== undefined) {
+        parts.push(`${formatValue(node.pressure)} mbar`);
+      }
+      return joinMetrics(parts);
+    }
 
     function buildRow(node) {
       const btn = renderNodeButton({
@@ -65,18 +95,21 @@
         long_name: node.long_name,
         avatar_bg: node.avatar_bg,
         avatar_fg: node.avatar_fg,
+        last_seen: node.last_seen,
+        subtitle: `Last seen ${formatMessageTime(node.last_seen)}`,
       });
+      const hops = node.last_hops;
+      const battery = batterySummary(node);
+      const environment = environmentSummary(node);
+      const hopsClass = hops === null || hops === undefined ? "nowrap cell-empty" : "nowrap";
+      const batteryClass = battery ? "nowrap" : "nowrap cell-empty";
+      const envClass = environment ? "" : "cell-empty";
       return `
         <tr>
-          <td class="nowrap" data-label="Last Seen">${formatTime(node.last_seen)}</td>
           <td class="cell-primary" data-label="Node">${btn}</td>
-          <td class="nowrap" data-label="Last Ping">${formatTime(node.last_ping)}</td>
-          <td class="nowrap" data-label="Hops">${formatValue(node.last_hops)}</td>
-          <td class="nowrap" data-label="Voltage">${formatValueUnit(node.battery_voltage, "V")}</td>
-          <td class="nowrap" data-label="Battery">${formatValueUnit(node.battery_level, "%")}</td>
-          <td class="nowrap" data-label="Temp">${formatValueUnit(node.temperature, "°C")}</td>
-          <td class="nowrap" data-label="Humidity">${formatValueUnit(node.humidity, "%hr")}</td>
-          <td class="nowrap" data-label="Pressure">${formatValueUnit(node.pressure, "mbar")}</td>
+          <td class="${hopsClass}" data-label="Hops">${escapeHtml(formatValue(hops))}</td>
+          <td class="${batteryClass}" data-label="Battery">${escapeHtml(battery || "-")}</td>
+          <td class="${envClass}" data-label="Environment">${escapeHtml(environment || "-")}</td>
         </tr>`;
     }
 
@@ -89,7 +122,7 @@
         const nodes = payload.nodes || [];
         tbody.innerHTML = nodes.length
           ? nodes.map(buildRow).join("")
-          : '<tr><td colspan="9" class="muted">No nodes yet.</td></tr>';
+          : '<tr><td colspan="4" class="muted">No nodes yet.</td></tr>';
       } catch (e) {
         console.warn("Failed to refresh nodes", e);
       }
