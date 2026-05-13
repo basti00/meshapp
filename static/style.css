@@ -222,15 +222,18 @@ tbody tr:hover { background: var(--panel-hover); }
   color: var(--accent);
   font-weight: 700;
   font-size: 13px;
-  font-family: var(--font-avatar);
+  font-family: var(--font-main);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
   line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
-.avatar--small { font-size: 10px; letter-spacing: -0.02em; }
+.avatar--small { font-size: 10px; letter-spacing: -0.03em; }
+.avatar--emoji { font-family: var(--font-avatar); }
 
 .node-name {
   font-weight: 600;
@@ -262,6 +265,69 @@ tbody tr:hover { background: var(--panel-hover); }
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+/* ---------- Message bubbles ---------- */
+.message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bubble {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: var(--shadow);
+}
+
+.bubble__header { display: flex; }
+
+.bubble__body {
+  font-size: 15px;
+  line-height: 1.4;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.bubble__body--meta { font-size: 13px; }
+
+.bubble__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.bubble__meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bubble__meta span + span::before {
+  content: "·";
+  margin-right: 8px;
+  opacity: 0.6;
+}
+
+.bubble__time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.empty-state {
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
 }
 
 /* ---------- Modal ---------- */

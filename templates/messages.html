@@ -12,47 +12,39 @@
     {% endfor %}
   </div>
 {% endif %}
-<div class="card">
-  <div class="table-wrap">
-    <table class="responsive-stack">
-      <thead>
-        <tr>
-          <th>Time</th>
-          <th>From</th>
-          <th>Message</th>
-          <th>Hops</th>
-          <th>RSSI / SNR</th>
-        </tr>
-      </thead>
-      <tbody id="messages-body">
-        {% if messages %}
-          {% for msg in messages %}
-          <tr>
-            <td class="nowrap" data-label="Time">{{ msg.rx_time | datetime }}</td>
-            <td class="cell-primary" data-label="From">
-              {% set display_name = msg.long_name or msg.short_name or msg.from_id or "-" %}
-              {% set avatar_text_raw = msg.short_name or (msg.long_name[:2] if msg.long_name else (msg.from_id[:2] if msg.from_id else "?")) %}
-              {% set avatar_text = avatar_text_raw[:4] | upper %}
-              {% set avatar_small = avatar_text | length >= 4 %}
-              <button type="button" class="node-button" data-node-id="{{ msg.from_id or '' }}">
-                <span class="avatar{% if avatar_small %} avatar--small{% endif %}"
-                      {% if msg.avatar_bg or msg.avatar_fg %}style="{% if msg.avatar_bg %}background: {{ msg.avatar_bg }};{% endif %}{% if msg.avatar_fg %} color: {{ msg.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
-                <span class="node-name">{{ display_name }}</span>
-              </button>
-            </td>
-            <td data-label="Message">
-              {% if msg.text %}{{ msg.text }}{% else %}<span class="tag">{{ msg.portnum or "unknown" }}</span>{% endif %}
-            </td>
-            <td class="nowrap" data-label="Hops">{{ msg.hops | value }}</td>
-            <td class="nowrap" data-label="RSSI / SNR">{{ msg.rx_rssi | value }} / {{ msg.rx_snr | value }}</td>
-          </tr>
-          {% endfor %}
+<div id="messages-list" class="message-list">
+  {% if messages %}
+    {% for msg in messages %}
+      {% set display_name = msg.long_name or msg.short_name or msg.from_id or "-" %}
+      {% set avatar_text_raw = msg.short_name or (msg.long_name[:2] if msg.long_name else (msg.from_id[:2] if msg.from_id else "?")) %}
+      {% set avatar_text = avatar_text_raw[:4] | upper %}
+      {% set avatar_small = avatar_text | length >= 4 %}
+      <article class="bubble">
+        <header class="bubble__header">
+          <button type="button" class="node-button" data-node-id="{{ msg.from_id or '' }}">
+            <span class="avatar{% if avatar_small %} avatar--small{% endif %}"
+                  {% if msg.avatar_bg or msg.avatar_fg %}style="{% if msg.avatar_bg %}background: {{ msg.avatar_bg }};{% endif %}{% if msg.avatar_fg %} color: {{ msg.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
+            <span class="node-name">{{ display_name }}</span>
+          </button>
+        </header>
+        {% if msg.text %}
+          <div class="bubble__body">{{ msg.text }}</div>
         {% else %}
-          <tr><td colspan="5" class="muted">No messages yet.</td></tr>
+          <div class="bubble__body bubble__body--meta"><span class="tag">{{ msg.portnum or "unknown" }}</span></div>
         {% endif %}
-      </tbody>
-    </table>
-  </div>
+        <footer class="bubble__footer">
+          <span class="bubble__meta">
+            {% if msg.hops is not none %}<span>{{ msg.hops }} {{ "hop" if msg.hops == 1 else "hops" }}</span>{% endif %}
+            {% if msg.rx_rssi is not none %}<span>{{ msg.rx_rssi | value }} dBm</span>{% endif %}
+            {% if msg.rx_snr is not none %}<span>SNR {{ msg.rx_snr | value }}</span>{% endif %}
+          </span>
+          <time class="bubble__time" datetime="{{ msg.rx_time }}">{{ msg.rx_time | message_time }}</time>
+        </footer>
+      </article>
+    {% endfor %}
+  {% else %}
+    <div class="empty-state">No messages yet.</div>
+  {% endif %}
 </div>
 {% endblock %}
 {% block scripts %}
@@ -60,13 +52,25 @@
   (function () {
     const refreshSeconds = {{ auto_refresh_seconds or 0 }};
     const channelKey = {{ current_channel.channel_key | tojson }};
-    const tbody = document.getElementById("messages-body");
-    const { formatTime, formatValue, escapeHtml, renderNodeButton } = window.MeshApp;
+    const list = document.getElementById("messages-list");
+    const { formatMessageTime, formatValue, escapeHtml, renderNodeButton } = window.MeshApp;
 
-    function buildRow(msg) {
-      const messageBody = msg.text
-        ? escapeHtml(msg.text)
-        : `<span class="tag">${escapeHtml(msg.portnum || "unknown")}</span>`;
+    function renderMeta(msg) {
+      const parts = [];
+      if (msg.hops !== null && msg.hops !== undefined) {
+        const label = Number(msg.hops) === 1 ? "hop" : "hops";
+        parts.push(`<span>${escapeHtml(msg.hops)} ${label}</span>`);
+      }
+      if (msg.rx_rssi !== null && msg.rx_rssi !== undefined) {
+        parts.push(`<span>${escapeHtml(formatValue(msg.rx_rssi))} dBm</span>`);
+      }
+      if (msg.rx_snr !== null && msg.rx_snr !== undefined) {
+        parts.push(`<span>SNR ${escapeHtml(formatValue(msg.rx_snr))}</span>`);
+      }
+      return parts.join("");
+    }
+
+    function buildBubble(msg) {
       const nodeBtn = renderNodeButton({
         node_id: msg.from_id,
         short_name: msg.short_name,
@@ -74,26 +78,30 @@
         avatar_bg: msg.avatar_bg,
         avatar_fg: msg.avatar_fg,
       });
+      const body = msg.text
+        ? `<div class="bubble__body">${escapeHtml(msg.text)}</div>`
+        : `<div class="bubble__body bubble__body--meta"><span class="tag">${escapeHtml(msg.portnum || "unknown")}</span></div>`;
       return `
-        <tr>
-          <td class="nowrap" data-label="Time">${formatTime(msg.rx_time)}</td>
-          <td class="cell-primary" data-label="From">${nodeBtn}</td>
-          <td data-label="Message">${messageBody}</td>
-          <td class="nowrap" data-label="Hops">${formatValue(msg.hops)}</td>
-          <td class="nowrap" data-label="RSSI / SNR">${formatValue(msg.rx_rssi)} / ${formatValue(msg.rx_snr)}</td>
-        </tr>`;
+        <article class="bubble">
+          <header class="bubble__header">${nodeBtn}</header>
+          ${body}
+          <footer class="bubble__footer">
+            <span class="bubble__meta">${renderMeta(msg)}</span>
+            <time class="bubble__time" datetime="${escapeHtml(msg.rx_time || '')}">${escapeHtml(formatMessageTime(msg.rx_time))}</time>
+          </footer>
+        </article>`;
     }
 
     async function refresh() {
-      if (!tbody || channelKey === null || channelKey === undefined) return;
+      if (!list || channelKey === null || channelKey === undefined) return;
       try {
         const response = await fetch(`/api/messages/${encodeURIComponent(channelKey)}`, { cache: "no-store" });
         if (!response.ok) return;
         const payload = await response.json();
         const messages = payload.messages || [];
-        tbody.innerHTML = messages.length
-          ? messages.map(buildRow).join("")
-          : '<tr><td colspan="5" class="muted">No messages yet.</td></tr>';
+        list.innerHTML = messages.length
+          ? messages.map(buildBubble).join("")
+          : '<div class="empty-state">No messages yet.</div>';
       } catch (e) {
         console.warn("Failed to refresh messages", e);
       }

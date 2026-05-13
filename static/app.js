@@ -46,6 +46,21 @@
       `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
   }
 
+  function formatMessageTime(epochSeconds) {
+    if (epochSeconds === null || epochSeconds === undefined) return "-";
+    const numeric = Number(epochSeconds);
+    if (!numeric) return "-";
+    const date = new Date(numeric * 1000);
+    if (Number.isNaN(date.getTime())) return "-";
+    const now = new Date();
+    const sameDay = date.getFullYear() === now.getFullYear() &&
+                    date.getMonth() === now.getMonth() &&
+                    date.getDate() === now.getDate();
+    const hm = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    if (sameDay) return hm;
+    return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()} ${hm}`;
+  }
+
   function formatValue(value, digits) {
     if (digits === undefined) digits = 2;
     if (value === null || value === undefined || value === "") return "-";
@@ -283,6 +298,7 @@
   // Expose helpers used by page templates
   window.MeshApp = {
     formatTime,
+    formatMessageTime,
     formatValue,
     formatValueUnit,
     escapeHtml,

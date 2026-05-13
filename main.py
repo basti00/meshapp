@@ -52,6 +52,16 @@ def _format_time(value):
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _format_message_time(value):
+    if not value:
+        return "-"
+    dt = datetime.fromtimestamp(int(value), tz=timezone.utc).astimezone()
+    today = datetime.now().astimezone().date()
+    if dt.date() == today:
+        return dt.strftime("%H:%M")
+    return dt.strftime("%d.%m.%Y %H:%M")
+
+
 def _format_value(value, digits=2):
     if value is None:
         return "-"
@@ -774,6 +784,7 @@ def node_detail_api(node_id):
 
 
 app.jinja_env.filters["datetime"] = _format_time
+app.jinja_env.filters["message_time"] = _format_message_time
 app.jinja_env.filters["value"] = _format_value
 app.jinja_env.filters["value_unit"] = _format_value_unit
 
