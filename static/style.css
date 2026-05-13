@@ -14,8 +14,8 @@
   --overlay: rgba(16, 24, 40, 0.55);
   --tag-bg: #e9eefc;
   --tag-fg: #2f6fed;
-  --font-main: "Segoe UI", "Segoe UI Emoji", "Segoe UI Symbol", "Apple Color Emoji", "Noto Color Emoji", "Noto Emoji", sans-serif;
-  --font-avatar: "Segoe UI Emoji", "Segoe UI Symbol", "Segoe UI", "Apple Color Emoji", "Noto Color Emoji", "Noto Emoji", sans-serif;
+  --font-main: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+  --font-avatar: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", "Segoe UI Symbol", "Noto Emoji", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
 
 [data-theme="dark"] {
@@ -44,11 +44,12 @@ html, body {
 
 body {
   margin: 0;
-  font-family: var(--font-avatar);
+  font-family: var(--font-main);
   background: var(--bg);
   background-image: var(--bg-gradient);
   color: var(--text);
   -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
   min-height: 100vh;
 }
 
@@ -214,21 +215,22 @@ tbody tr:hover { background: var(--panel-hover); }
 .node-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .avatar {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 700;
-  font-size: 12px;
-  font-family: var(--font-main);
+  font-size: 13px;
+  font-family: var(--font-avatar);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  line-height: 1;
 }
 
-.avatar--small { font-size: 10px; }
+.avatar--small { font-size: 10px; letter-spacing: -0.02em; }
 
 .node-name {
   font-weight: 600;
@@ -389,51 +391,58 @@ tbody tr:hover { background: var(--panel-hover); }
   table.responsive-stack thead { display: none; }
 
   table.responsive-stack,
-  table.responsive-stack tbody,
-  table.responsive-stack tr,
-  table.responsive-stack td {
+  table.responsive-stack tbody {
     display: block;
     width: 100%;
   }
 
   table.responsive-stack tr {
+    display: block;
     border: 1px solid var(--border);
     border-radius: 10px;
     margin-bottom: 10px;
-    padding: 8px 10px;
+    padding: 10px 12px;
     background: var(--panel);
   }
 
   table.responsive-stack tr:hover { background: var(--panel-hover); }
 
   table.responsive-stack td {
-    border: none;
+    display: grid;
+    grid-template-columns: 90px minmax(0, 1fr);
+    column-gap: 12px;
+    align-items: baseline;
     padding: 4px 0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
+    border: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: left;
   }
 
   table.responsive-stack td::before {
     content: attr(data-label);
     color: var(--muted);
-    font-size: 12px;
-    font-weight: 600;
+    font-size: 11px;
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    flex: 0 0 auto;
+    padding-top: 2px;
   }
 
   table.responsive-stack td.cell-primary {
+    display: block;
     border-bottom: 1px solid var(--border);
     margin-bottom: 6px;
     padding-bottom: 8px;
-    justify-content: flex-start;
   }
 
   table.responsive-stack td.cell-primary::before { display: none; }
 
   .channel-tabs { gap: 6px; }
-  .channel-tabs a { padding: 5px 10px; font-size: 13px; }
+  .channel-tabs a {
+    padding: 5px 10px;
+    font-size: 13px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
 }
