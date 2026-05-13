@@ -116,12 +116,10 @@ def _node_subtitle(node):
 
 def _environment_summary(node):
     parts = []
-    if node.get("temperature") is not None:
-        parts.append(f"{_format_value(node['temperature'])} °C")
-    if node.get("humidity") is not None:
-        parts.append(f"{_format_value(node['humidity'])} %hr")
-    if node.get("pressure") is not None:
-        parts.append(f"{_format_value(node['pressure'])} mbar")
+    for key, unit in (("temperature", "°C"), ("humidity", "%hr"), ("pressure", "mbar")):
+        formatted = _format_value(node.get(key))
+        if formatted != "-":
+            parts.append(f"{formatted} {unit}")
     return _join_metrics(parts)
 
 
@@ -132,6 +130,8 @@ def _format_value(value, digits=2):
         number = float(value)
     except (TypeError, ValueError):
         return str(value)
+    if number != number or number in (float("inf"), float("-inf")):
+        return "-"
     if number.is_integer():
         return str(int(number))
     return f"{number:.{digits}f}"

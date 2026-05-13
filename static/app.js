@@ -65,7 +65,7 @@
     if (digits === undefined) digits = 2;
     if (value === null || value === undefined || value === "") return "-";
     const n = Number(value);
-    if (!Number.isFinite(n)) return String(value);
+    if (!Number.isFinite(n)) return "-";
     if (Number.isInteger(n)) return String(n);
     return n.toFixed(digits);
   }
@@ -124,8 +124,10 @@
     const info = batteryInfo(level);
     if (!info) return "";
     return `<span class="battery ${info.cssClass}" aria-label="Battery ${info.level}%">` +
+      `<span class="battery__icon">` +
       `<span class="battery__shell"><span class="battery__fill" style="width: ${info.level}%"></span></span>` +
       `<span class="battery__cap"></span>` +
+      `</span>` +
       `<span class="battery__label">${info.level} %</span>` +
       `</span>`;
   }

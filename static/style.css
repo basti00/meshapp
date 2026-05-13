@@ -256,29 +256,39 @@ tbody tr:hover { background: var(--panel-hover); }
 .battery {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
   white-space: nowrap;
+  line-height: 1;
+}
+
+.battery__icon {
+  display: inline-flex;
+  align-items: center;
 }
 
 .battery__shell {
-  display: inline-flex;
-  align-items: center;
+  position: relative;
+  display: inline-block;
   width: 22px;
   height: 11px;
   border: 1.5px solid currentColor;
-  border-radius: 2px;
-  padding: 1px;
-  box-sizing: content-box;
+  border-radius: 3px;
+  box-sizing: border-box;
+  overflow: hidden;
+  vertical-align: middle;
 }
 
 .battery__fill {
-  display: block;
-  height: 100%;
-  border-radius: 1px;
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  left: 1px;
   background: currentColor;
+  border-radius: 1px;
+  max-width: calc(100% - 2px);
 }
 
 .battery__cap {
@@ -286,8 +296,13 @@ tbody tr:hover { background: var(--panel-hover); }
   width: 2px;
   height: 5px;
   background: currentColor;
-  border-radius: 0 1px 1px 0;
+  border-radius: 0 1.5px 1.5px 0;
   margin-left: 1px;
+  vertical-align: middle;
+}
+
+.battery__label {
+  font-variant-numeric: tabular-nums;
 }
 
 .battery--low { color: #e9534b; }

@@ -42,8 +42,10 @@
                     <span class="node-name">{{ display_name }}</span>
                     {% if battery %}
                     <span class="battery {{ battery.css_class }}" aria-label="Battery {{ battery.level }}%">
-                      <span class="battery__shell"><span class="battery__fill" style="width: {{ battery.level }}%"></span></span>
-                      <span class="battery__cap"></span>
+                      <span class="battery__icon">
+                        <span class="battery__shell"><span class="battery__fill" style="width: {{ battery.level }}%"></span></span>
+                        <span class="battery__cap"></span>
+                      </span>
                       <span class="battery__label">{{ battery.level }} %</span>
                     </span>
                     {% endif %}
@@ -91,17 +93,17 @@
       return filtered.length ? filtered.join(" · ") : null;
     }
 
+    function appendMetric(parts, value, unit) {
+      const formatted = formatValue(value);
+      if (formatted === "-") return;
+      parts.push(`${formatted} ${unit}`);
+    }
+
     function environmentSummary(node) {
       const parts = [];
-      if (node.temperature !== null && node.temperature !== undefined) {
-        parts.push(`${formatValue(node.temperature)} °C`);
-      }
-      if (node.humidity !== null && node.humidity !== undefined) {
-        parts.push(`${formatValue(node.humidity)} %hr`);
-      }
-      if (node.pressure !== null && node.pressure !== undefined) {
-        parts.push(`${formatValue(node.pressure)} mbar`);
-      }
+      appendMetric(parts, node.temperature, "°C");
+      appendMetric(parts, node.humidity, "%hr");
+      appendMetric(parts, node.pressure, "mbar");
       return joinMetrics(parts);
     }
 
