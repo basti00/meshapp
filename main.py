@@ -752,6 +752,27 @@ def nodes_api():
     return jsonify({"nodes": node_list})
 
 
+@app.route("/api/nodes/<path:node_id>")
+def node_detail_api(node_id):
+    with _db_connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM nodes WHERE node_id = ?",
+            (node_id,),
+        ).fetchone()
+    if row is None:
+        return jsonify({"error": "not found", "node_id": node_id}), 404
+    node = dict(row)
+    node.update(_node_avatar_colors(node.get("node_id")))
+    for key in ("telemetry_json", "position_json"):
+        raw = node.get(key)
+        if isinstance(raw, str) and raw:
+            try:
+                node[key.replace("_json", "")] = json.loads(raw)
+            except (TypeError, ValueError):
+                pass
+    return jsonify({"node": node})
+
+
 app.jinja_env.filters["datetime"] = _format_time
 app.jinja_env.filters["value"] = _format_value
 app.jinja_env.filters["value_unit"] = _format_value_unit

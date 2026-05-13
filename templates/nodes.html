@@ -1,193 +1,102 @@
 {% extends "base.html" %}
+{% block title %}Nodes · Meshapp{% endblock %}
 {% block content %}
 <h1>Nodes</h1>
 <div class="card">
-  <table>
-    <thead>
-      <tr>
-        <th class="nowrap">Last Seen</th>
-        <th>Node</th>
-        <th class="nowrap">Last Ping</th>
-        <th class="nowrap">Hops</th>
-        <th class="nowrap">Voltage</th>
-        <th class="nowrap">Battery</th>
-        <th class="nowrap">Temp</th>
-        <th class="nowrap">Humidity</th>
-        <th class="nowrap">Pressure</th>
-      </tr>
-    </thead>
-    <tbody id="nodes-body">
-      {% if nodes %}
-        {% for node in nodes %}
+  <div class="table-wrap">
+    <table class="responsive-stack">
+      <thead>
         <tr>
-          <td class="nowrap">{{ node.last_seen | datetime }}</td>
-          <td>
-            {% set display_name = node.long_name or node.short_name or node.node_id %}
-            {% set avatar_text_raw = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
-            {% set avatar_text = avatar_text_raw[:4] | upper %}
-            {% set avatar_small = avatar_text | length >= 4 %}
-            {% set hover_info = "Node ID: " ~ (node.node_id or "-") ~ " | Short: " ~ (node.short_name or "-") ~ " | Long: " ~ (node.long_name or "-") ~ " | HW: " ~ (node.hw_model or "-") ~ " | Telemetry total/daily: " ~ (node.telemetry_count_total | value) ~ " / " ~ (node.telemetry_count_daily | value) ~ " | Nodeinfo total/daily: " ~ (node.nodeinfo_count_total | value) ~ " / " ~ (node.nodeinfo_count_daily | value) ~ " | Position total/daily: " ~ (node.position_count_total | value) ~ " / " ~ (node.position_count_daily | value) ~ " | Other total/daily: " ~ (node.other_count_total | value) ~ " / " ~ (node.other_count_daily | value) %}
-            <span class="node-label hover-info" title="{{ hover_info }}">
-              <span class="avatar{% if avatar_small %} avatar--small{% endif %}"{% if node.avatar_bg or node.avatar_fg %} style="{% if node.avatar_bg %}background: {{ node.avatar_bg }};{% endif %}{% if node.avatar_fg %} color: {{ node.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
-              <span class="node-name">{{ display_name }}</span>
-            </span>
-          </td>
-          <td class="nowrap">{{ node.last_ping | datetime }}</td>
-          <td class="nowrap">{{ node.last_hops | value }}</td>
-          <td class="nowrap">{{ node.battery_voltage | value_unit("V") }}</td>
-          <td class="nowrap">{{ node.battery_level | value_unit("%") }}</td>
-          <td class="nowrap">{{ node.temperature | value_unit("°C") }}</td>
-          <td class="nowrap">{{ node.humidity | value_unit("%hr") }}</td>
-          <td class="nowrap">{{ node.pressure | value_unit("mbar") }}</td>
+          <th>Last Seen</th>
+          <th>Node</th>
+          <th>Last Ping</th>
+          <th>Hops</th>
+          <th>Voltage</th>
+          <th>Battery</th>
+          <th>Temp</th>
+          <th>Humidity</th>
+          <th>Pressure</th>
         </tr>
-        {% endfor %}
-      {% else %}
-        <tr>
-          <td colspan="9" class="muted">No nodes yet.</td>
-        </tr>
-      {% endif %}
-    </tbody>
-  </table>
+      </thead>
+      <tbody id="nodes-body">
+        {% if nodes %}
+          {% for node in nodes %}
+          <tr>
+            <td class="nowrap" data-label="Last Seen">{{ node.last_seen | datetime }}</td>
+            <td class="cell-primary" data-label="Node">
+              {% set display_name = node.long_name or node.short_name or node.node_id %}
+              {% set avatar_text_raw = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
+              {% set avatar_text = avatar_text_raw[:4] | upper %}
+              {% set avatar_small = avatar_text | length >= 4 %}
+              <button type="button" class="node-button" data-node-id="{{ node.node_id or '' }}">
+                <span class="avatar{% if avatar_small %} avatar--small{% endif %}"
+                      {% if node.avatar_bg or node.avatar_fg %}style="{% if node.avatar_bg %}background: {{ node.avatar_bg }};{% endif %}{% if node.avatar_fg %} color: {{ node.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
+                <span class="node-name">{{ display_name }}</span>
+              </button>
+            </td>
+            <td class="nowrap" data-label="Last Ping">{{ node.last_ping | datetime }}</td>
+            <td class="nowrap" data-label="Hops">{{ node.last_hops | value }}</td>
+            <td class="nowrap" data-label="Voltage">{{ node.battery_voltage | value_unit("V") }}</td>
+            <td class="nowrap" data-label="Battery">{{ node.battery_level | value_unit("%") }}</td>
+            <td class="nowrap" data-label="Temp">{{ node.temperature | value_unit("°C") }}</td>
+            <td class="nowrap" data-label="Humidity">{{ node.humidity | value_unit("%hr") }}</td>
+            <td class="nowrap" data-label="Pressure">{{ node.pressure | value_unit("mbar") }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="9" class="muted">No nodes yet.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
 </div>
+{% endblock %}
+{% block scripts %}
 <script>
-  const refreshSeconds = {{ auto_refresh_seconds or 0 }};
-  const tbody = document.getElementById("nodes-body");
-  const UNITS = {
-    voltage: "V",
-    battery: "%",
-    temperature: "°C",
-    humidity: "%hr",
-    pressure: "mbar",
-  };
+  (function () {
+    const refreshSeconds = {{ auto_refresh_seconds or 0 }};
+    const tbody = document.getElementById("nodes-body");
+    const { formatTime, formatValue, formatValueUnit, renderNodeButton } = window.MeshApp;
 
-  function pad(value) {
-    return String(value).padStart(2, "0");
-  }
-
-  function formatTime(epochSeconds) {
-    if (epochSeconds === null || epochSeconds === undefined) {
-      return "-";
+    function buildRow(node) {
+      const btn = renderNodeButton({
+        node_id: node.node_id,
+        short_name: node.short_name,
+        long_name: node.long_name,
+        avatar_bg: node.avatar_bg,
+        avatar_fg: node.avatar_fg,
+      });
+      return `
+        <tr>
+          <td class="nowrap" data-label="Last Seen">${formatTime(node.last_seen)}</td>
+          <td class="cell-primary" data-label="Node">${btn}</td>
+          <td class="nowrap" data-label="Last Ping">${formatTime(node.last_ping)}</td>
+          <td class="nowrap" data-label="Hops">${formatValue(node.last_hops)}</td>
+          <td class="nowrap" data-label="Voltage">${formatValueUnit(node.battery_voltage, "V")}</td>
+          <td class="nowrap" data-label="Battery">${formatValueUnit(node.battery_level, "%")}</td>
+          <td class="nowrap" data-label="Temp">${formatValueUnit(node.temperature, "°C")}</td>
+          <td class="nowrap" data-label="Humidity">${formatValueUnit(node.humidity, "%hr")}</td>
+          <td class="nowrap" data-label="Pressure">${formatValueUnit(node.pressure, "mbar")}</td>
+        </tr>`;
     }
-    const numeric = Number(epochSeconds);
-    if (!numeric) {
-      return "-";
-    }
-    const date = new Date(numeric * 1000);
-    if (Number.isNaN(date.getTime())) {
-      return "-";
-    }
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
-      `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-  }
 
-  function formatValue(value, digits = 2) {
-    if (value === null || value === undefined) {
-      return "-";
-    }
-    const numberValue = Number(value);
-    if (!Number.isFinite(numberValue)) {
-      return String(value);
-    }
-    if (Number.isInteger(numberValue)) {
-      return String(numberValue);
-    }
-    return numberValue.toFixed(digits);
-  }
-
-  function formatValueUnit(value, unit, digits = 2) {
-    const formatted = formatValue(value, digits);
-    if (formatted === "-") {
-      return formatted;
-    }
-    return `${formatted} ${unit}`;
-  }
-
-  function escapeHtml(value) {
-    return String(value)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-  }
-
-  function avatarTextLength(value) {
-    return Array.from(String(value)).length;
-  }
-
-  function normalizeAvatarText(value) {
-    return Array.from(String(value)).slice(0, 4).join("");
-  }
-
-  function buildAvatarStyle(background, foreground) {
-    const styles = [];
-    if (background) {
-      styles.push(`background: ${background}`);
-    }
-    if (foreground) {
-      styles.push(`color: ${foreground}`);
-    }
-    return styles.length ? `style="${styles.join("; ")}"` : "";
-  }
-
-  function buildNodeRow(node) {
-    const displayName = node.long_name || node.short_name || node.node_id || "-";
-    const avatarTextRaw = node.short_name ||
-      (node.long_name ? node.long_name.slice(0, 2) : (node.node_id ? node.node_id.slice(0, 2) : "?"));
-    const avatarText = normalizeAvatarText(avatarTextRaw).toUpperCase();
-    const avatarClass = avatarTextLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
-    const hoverInfo = `Node ID: ${node.node_id || "-"} | Short: ${node.short_name || "-"} ` +
-      `| Long: ${node.long_name || "-"} | HW: ${node.hw_model || "-"} ` +
-      `| Telemetry total/daily: ${formatValue(node.telemetry_count_total)} / ${formatValue(node.telemetry_count_daily)} ` +
-      `| Nodeinfo total/daily: ${formatValue(node.nodeinfo_count_total)} / ${formatValue(node.nodeinfo_count_daily)} ` +
-      `| Position total/daily: ${formatValue(node.position_count_total)} / ${formatValue(node.position_count_daily)} ` +
-      `| Other total/daily: ${formatValue(node.other_count_total)} / ${formatValue(node.other_count_daily)}`;
-    const avatarStyle = buildAvatarStyle(node.avatar_bg, node.avatar_fg);
-
-    return `
-      <tr>
-        <td class="nowrap">${formatTime(node.last_seen)}</td>
-        <td>
-          <span class="node-label hover-info" title="${escapeHtml(hoverInfo)}">
-            <span class="${avatarClass}" ${avatarStyle}>${escapeHtml(avatarText)}</span>
-            <span class="node-name">${escapeHtml(displayName)}</span>
-          </span>
-        </td>
-        <td class="nowrap">${formatTime(node.last_ping)}</td>
-        <td class="nowrap">${formatValue(node.last_hops)}</td>
-        <td class="nowrap">${formatValueUnit(node.battery_voltage, UNITS.voltage)}</td>
-        <td class="nowrap">${formatValueUnit(node.battery_level, UNITS.battery)}</td>
-        <td class="nowrap">${formatValueUnit(node.temperature, UNITS.temperature)}</td>
-        <td class="nowrap">${formatValueUnit(node.humidity, UNITS.humidity)}</td>
-        <td class="nowrap">${formatValueUnit(node.pressure, UNITS.pressure)}</td>
-      </tr>
-    `;
-  }
-
-  async function refreshNodes() {
-    if (!tbody) {
-      return;
-    }
-    try {
-      const response = await fetch("/api/nodes", { cache: "no-store" });
-      if (!response.ok) {
-        return;
+    async function refresh() {
+      if (!tbody) return;
+      try {
+        const response = await fetch("/api/nodes", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        const nodes = payload.nodes || [];
+        tbody.innerHTML = nodes.length
+          ? nodes.map(buildRow).join("")
+          : '<tr><td colspan="9" class="muted">No nodes yet.</td></tr>';
+      } catch (e) {
+        console.warn("Failed to refresh nodes", e);
       }
-      const payload = await response.json();
-      const nodes = payload.nodes || [];
-      if (!nodes.length) {
-        tbody.innerHTML = '<tr><td colspan="9" class="muted">No nodes yet.</td></tr>';
-        return;
-      }
-      tbody.innerHTML = nodes.map(buildNodeRow).join("");
-    } catch (error) {
-      console.warn("Failed to refresh nodes", error);
     }
-  }
 
-  if (refreshSeconds && refreshSeconds > 0) {
-    setInterval(refreshNodes, refreshSeconds * 1000);
-  }
-  refreshNodes();
+    if (refreshSeconds > 0) setInterval(refresh, refreshSeconds * 1000);
+    refresh();
+  })();
 </script>
 {% endblock %}

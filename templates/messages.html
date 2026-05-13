@@ -1,185 +1,106 @@
 {% extends "base.html" %}
+{% block title %}Messages · Meshapp{% endblock %}
 {% block content %}
 <h1>Messages</h1>
 {% if channels %}
   <div class="channel-tabs">
     {% for channel in channels %}
       {% set channel_label = "Channel " ~ (channel.channel_index if channel.channel_index is not none else (channel.channel_key or "?")) %}
-      <a href="{{ url_for('messages_channel', channel_key=channel.channel_key) }}" class="{% if channel.channel_key == current_channel.channel_key %}active{% endif %}" title="Key: {{ channel.channel_key }}">
-        {{ channel_label }}
-      </a>
+      <a href="{{ url_for('messages_channel', channel_key=channel.channel_key) }}"
+         class="{% if channel.channel_key == current_channel.channel_key %}active{% endif %}"
+         title="Key: {{ channel.channel_key }}">{{ channel_label }}</a>
     {% endfor %}
   </div>
 {% endif %}
 <div class="card">
-  <table>
-    <thead>
-      <tr>
-        <th class="nowrap">Time</th>
-        <th>From</th>
-        <th>Message</th>
-        <th class="nowrap">Hops</th>
-        <th class="nowrap">RSSI / SNR</th>
-      </tr>
-    </thead>
-    <tbody id="messages-body">
-      {% if messages %}
-        {% for msg in messages %}
+  <div class="table-wrap">
+    <table class="responsive-stack">
+      <thead>
         <tr>
-          <td class="nowrap">{{ msg.rx_time | datetime }}</td>
-          <td>
-            {% set display_name = msg.long_name or msg.short_name or msg.from_id or "-" %}
-            {% set avatar_text_raw = msg.short_name or (msg.long_name[:2] if msg.long_name else (msg.from_id[:2] if msg.from_id else "?")) %}
-            {% set avatar_text = avatar_text_raw[:4] | upper %}
-            {% set avatar_small = avatar_text | length >= 4 %}
-            {% set hover_info = "Node ID: " ~ (msg.from_id or "-") ~ " | Short: " ~ (msg.short_name or "-") ~ " | Long: " ~ (msg.long_name or "-") ~ " | Channel: " ~ (msg.channel_index if msg.channel_index is not none else "-") ~ " | Key: " ~ (msg.channel_key or "-") ~ " | To: " ~ (msg.to_id or "-") ~ " | Port: " ~ (msg.portnum or "-") ~ " | Hops: " ~ (msg.hops if msg.hops is not none else "-") %}
-            <span class="node-label hover-info" title="{{ hover_info }}">
-              <span class="avatar{% if avatar_small %} avatar--small{% endif %}"{% if msg.avatar_bg or msg.avatar_fg %} style="{% if msg.avatar_bg %}background: {{ msg.avatar_bg }};{% endif %}{% if msg.avatar_fg %} color: {{ msg.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
-              <span class="node-name">{{ display_name }}</span>
-            </span>
-          </td>
-          <td>
-            {% if msg.text %}
-              {{ msg.text }}
-            {% else %}
-              <span class="tag">{{ msg.portnum or "unknown" }}</span>
-            {% endif %}
-          </td>
-          <td class="nowrap">{{ msg.hops | value }}</td>
-          <td class="nowrap">{{ msg.rx_rssi | value }} / {{ msg.rx_snr | value }}</td>
+          <th>Time</th>
+          <th>From</th>
+          <th>Message</th>
+          <th>Hops</th>
+          <th>RSSI / SNR</th>
         </tr>
-        {% endfor %}
-      {% else %}
-        <tr>
-          <td colspan="5" class="muted">No messages yet.</td>
-        </tr>
-      {% endif %}
-    </tbody>
-  </table>
+      </thead>
+      <tbody id="messages-body">
+        {% if messages %}
+          {% for msg in messages %}
+          <tr>
+            <td class="nowrap" data-label="Time">{{ msg.rx_time | datetime }}</td>
+            <td class="cell-primary" data-label="From">
+              {% set display_name = msg.long_name or msg.short_name or msg.from_id or "-" %}
+              {% set avatar_text_raw = msg.short_name or (msg.long_name[:2] if msg.long_name else (msg.from_id[:2] if msg.from_id else "?")) %}
+              {% set avatar_text = avatar_text_raw[:4] | upper %}
+              {% set avatar_small = avatar_text | length >= 4 %}
+              <button type="button" class="node-button" data-node-id="{{ msg.from_id or '' }}">
+                <span class="avatar{% if avatar_small %} avatar--small{% endif %}"
+                      {% if msg.avatar_bg or msg.avatar_fg %}style="{% if msg.avatar_bg %}background: {{ msg.avatar_bg }};{% endif %}{% if msg.avatar_fg %} color: {{ msg.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
+                <span class="node-name">{{ display_name }}</span>
+              </button>
+            </td>
+            <td data-label="Message">
+              {% if msg.text %}{{ msg.text }}{% else %}<span class="tag">{{ msg.portnum or "unknown" }}</span>{% endif %}
+            </td>
+            <td class="nowrap" data-label="Hops">{{ msg.hops | value }}</td>
+            <td class="nowrap" data-label="RSSI / SNR">{{ msg.rx_rssi | value }} / {{ msg.rx_snr | value }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="5" class="muted">No messages yet.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
 </div>
+{% endblock %}
+{% block scripts %}
 <script>
-  const refreshSeconds = {{ auto_refresh_seconds or 0 }};
-  const channelKey = {{ current_channel.channel_key | tojson }};
-  const tbody = document.getElementById("messages-body");
+  (function () {
+    const refreshSeconds = {{ auto_refresh_seconds or 0 }};
+    const channelKey = {{ current_channel.channel_key | tojson }};
+    const tbody = document.getElementById("messages-body");
+    const { formatTime, formatValue, escapeHtml, renderNodeButton } = window.MeshApp;
 
-  function pad(value) {
-    return String(value).padStart(2, "0");
-  }
-
-  function formatTime(epochSeconds) {
-    if (epochSeconds === null || epochSeconds === undefined) {
-      return "-";
+    function buildRow(msg) {
+      const messageBody = msg.text
+        ? escapeHtml(msg.text)
+        : `<span class="tag">${escapeHtml(msg.portnum || "unknown")}</span>`;
+      const nodeBtn = renderNodeButton({
+        node_id: msg.from_id,
+        short_name: msg.short_name,
+        long_name: msg.long_name,
+        avatar_bg: msg.avatar_bg,
+        avatar_fg: msg.avatar_fg,
+      });
+      return `
+        <tr>
+          <td class="nowrap" data-label="Time">${formatTime(msg.rx_time)}</td>
+          <td class="cell-primary" data-label="From">${nodeBtn}</td>
+          <td data-label="Message">${messageBody}</td>
+          <td class="nowrap" data-label="Hops">${formatValue(msg.hops)}</td>
+          <td class="nowrap" data-label="RSSI / SNR">${formatValue(msg.rx_rssi)} / ${formatValue(msg.rx_snr)}</td>
+        </tr>`;
     }
-    const numeric = Number(epochSeconds);
-    if (!numeric) {
-      return "-";
-    }
-    const date = new Date(numeric * 1000);
-    if (Number.isNaN(date.getTime())) {
-      return "-";
-    }
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
-      `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-  }
 
-  function formatValue(value, digits = 2) {
-    if (value === null || value === undefined) {
-      return "-";
-    }
-    const numberValue = Number(value);
-    if (!Number.isFinite(numberValue)) {
-      return String(value);
-    }
-    if (Number.isInteger(numberValue)) {
-      return String(numberValue);
-    }
-    return numberValue.toFixed(digits);
-  }
-
-  function escapeHtml(value) {
-    return String(value)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-  }
-
-  function avatarTextLength(value) {
-    return Array.from(String(value)).length;
-  }
-
-  function normalizeAvatarText(value) {
-    return Array.from(String(value)).slice(0, 4).join("");
-  }
-
-  function buildAvatarStyle(background, foreground) {
-    const styles = [];
-    if (background) {
-      styles.push(`background: ${background}`);
-    }
-    if (foreground) {
-      styles.push(`color: ${foreground}`);
-    }
-    return styles.length ? `style="${styles.join("; ")}"` : "";
-  }
-
-  function buildMessageRow(msg) {
-    const displayName = msg.long_name || msg.short_name || msg.from_id || "-";
-    const avatarTextRaw = msg.short_name ||
-      (msg.long_name ? msg.long_name.slice(0, 2) : (msg.from_id ? msg.from_id.slice(0, 2) : "?"));
-    const avatarText = normalizeAvatarText(avatarTextRaw).toUpperCase();
-    const avatarClass = avatarTextLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
-    const channelIndex = msg.channel_index === null || msg.channel_index === undefined ? "-" : msg.channel_index;
-    const hopsValue = msg.hops === null || msg.hops === undefined ? "-" : msg.hops;
-    const hoverInfo = `Node ID: ${msg.from_id || "-"} | Short: ${msg.short_name || "-"} | Long: ${msg.long_name || "-"} ` +
-      `| Channel: ${channelIndex} | Key: ${msg.channel_key || "-"} | To: ${msg.to_id || "-"} ` +
-      `| Port: ${msg.portnum || "-"} | Hops: ${hopsValue}`;
-    const avatarStyle = buildAvatarStyle(msg.avatar_bg, msg.avatar_fg);
-    const messageBody = msg.text
-      ? escapeHtml(msg.text)
-      : `<span class="tag">${escapeHtml(msg.portnum || "unknown")}</span>`;
-
-    return `
-      <tr>
-        <td class="nowrap">${formatTime(msg.rx_time)}</td>
-        <td>
-          <span class="node-label hover-info" title="${escapeHtml(hoverInfo)}">
-            <span class="${avatarClass}" ${avatarStyle}>${escapeHtml(avatarText)}</span>
-            <span class="node-name">${escapeHtml(displayName)}</span>
-          </span>
-        </td>
-        <td>${messageBody}</td>
-        <td class="nowrap">${formatValue(msg.hops)}</td>
-        <td class="nowrap">${formatValue(msg.rx_rssi)} / ${formatValue(msg.rx_snr)}</td>
-      </tr>
-    `;
-  }
-
-  async function refreshMessages() {
-    if (!tbody || channelKey === null || channelKey === undefined) {
-      return;
-    }
-    try {
-      const response = await fetch(`/api/messages/${encodeURIComponent(channelKey)}`, { cache: "no-store" });
-      if (!response.ok) {
-        return;
+    async function refresh() {
+      if (!tbody || channelKey === null || channelKey === undefined) return;
+      try {
+        const response = await fetch(`/api/messages/${encodeURIComponent(channelKey)}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        const messages = payload.messages || [];
+        tbody.innerHTML = messages.length
+          ? messages.map(buildRow).join("")
+          : '<tr><td colspan="5" class="muted">No messages yet.</td></tr>';
+      } catch (e) {
+        console.warn("Failed to refresh messages", e);
       }
-      const payload = await response.json();
-      const messages = payload.messages || [];
-      if (!messages.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="muted">No messages yet.</td></tr>';
-        return;
-      }
-      tbody.innerHTML = messages.map(buildMessageRow).join("");
-    } catch (error) {
-      console.warn("Failed to refresh messages", error);
     }
-  }
 
-  if (refreshSeconds && refreshSeconds > 0) {
-    setInterval(refreshMessages, refreshSeconds * 1000);
-  }
-  refreshMessages();
+    if (refreshSeconds > 0) setInterval(refresh, refreshSeconds * 1000);
+    refresh();
+  })();
 </script>
 {% endblock %}
