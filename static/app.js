@@ -122,7 +122,7 @@
     return parts.length ? ` style="${parts.join("; ")}"` : "";
   }
 
-  const LIVE_THRESHOLD_SECONDS = 90 * 60;
+  const LIVE_THRESHOLD_SECONDS = 120 * 60;
 
   function isLive(lastSeen) {
     if (lastSeen === null || lastSeen === undefined) return false;
