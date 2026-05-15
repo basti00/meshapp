@@ -5,7 +5,7 @@ Stores Meshtastic packets in SQLite and serves a simple web UI.
 ## Run
 
 ```bash
-uv run python main.py
+uv run main.py
 ```
 
 ## Environment variables

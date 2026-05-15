@@ -894,22 +894,44 @@ def message_detail_api(message_id):
 
         reply_to = None
         if reply_id is not None:
+            # Older rows predate the packet_id column and only carry the mesh
+            # packet id inside raw_json, so match against either source.
             parent = conn.execute(
                 """
                 SELECT m.id, m.packet_id, m.text, m.from_id, m.rx_time,
                        n.short_name, n.long_name
                 FROM messages m
                 LEFT JOIN nodes n ON n.node_id = m.from_id
-                WHERE m.packet_id = ?
+                WHERE m.id != ?
+                  AND (m.packet_id = ?
+                       OR json_extract(m.raw_json, '$.id') = ?)
                 ORDER BY m.rx_time DESC
                 LIMIT 1
                 """,
-                (reply_id,),
+                (message_id, reply_id, reply_id),
             ).fetchone()
             if parent is not None:
                 reply_to = dict(parent)
                 reply_to.update(_node_avatar_colors(reply_to.get("from_id")))
         message["reply_to"] = reply_to
+
+        # Recipient node info, so the UI can show an avatar + name for direct
+        # messages (broadcasts have no specific recipient node).
+        to_node = None
+        to_id = message.get("to_id")
+        if to_id is not None and str(to_id) not in ("^all", "4294967295", "!ffffffff"):
+            recipient = conn.execute(
+                """
+                SELECT node_id, short_name, long_name
+                FROM nodes
+                WHERE node_id = ?
+                """,
+                (to_id,),
+            ).fetchone()
+            if recipient is not None:
+                to_node = dict(recipient)
+                to_node.update(_node_avatar_colors(to_node.get("node_id")))
+        message["to_node"] = to_node
 
     message.update(_node_avatar_colors(message.get("from_id")))
     return jsonify({"message": message})

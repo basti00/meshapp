@@ -188,7 +188,13 @@
 
   function openModal(modal) {
     if (!modal) return;
-    lastFocus = document.activeElement;
+    // Switching directly between modals (e.g. message → node) should not stack.
+    if (openModalEl && openModalEl !== modal) {
+      openModalEl.classList.remove("is-open");
+      openModalEl.setAttribute("aria-hidden", "true");
+    } else if (!openModalEl) {
+      lastFocus = document.activeElement;
+    }
     modal.classList.add("is-open");
     modal.setAttribute("aria-hidden", "false");
     document.body.style.overflow = "hidden";
@@ -352,13 +358,6 @@
   }
 
   // ---------- Message modal ----------
-  function recipientLabel(toId) {
-    if (toId === null || toId === undefined || toId === "") return null;
-    const s = String(toId);
-    if (s === "^all" || s === "4294967295" || s === "!ffffffff") return "Broadcast (^all)";
-    return s;
-  }
-
   function messageKind(message) {
     if (message.is_tapback) return "Tapback reaction";
     if (message.reply_id !== null && message.reply_id !== undefined) return "Reply";
@@ -379,20 +378,117 @@
     if (body) body.innerHTML = '<p class="muted">Fetching message details…</p>';
   }
 
+  function isBroadcastTarget(toId) {
+    if (toId === null || toId === undefined || toId === "") return false;
+    const s = String(toId);
+    return s === "^all" || s === "4294967295" || s === "!ffffffff";
+  }
+
+  // Renders an inline avatar + name pill for a message party (sender/recipient).
+  function renderMsgParty(party) {
+    const avatarText = party.avatarText || "?";
+    const avCls = avatarLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
+    const style = buildAvatarStyle(party.avatar_bg, party.avatar_fg);
+    const inner =
+      `<span class="${avCls}"${style} aria-hidden="true">${escapeHtml(avatarText)}</span>` +
+      `<span class="msg-party__name">${escapeHtml(party.name)}</span>`;
+    if (party.node_id) {
+      return `<button type="button" class="msg-party msg-party--link" ` +
+        `data-node-id="${escapeHtml(String(party.node_id))}">${inner}</button>`;
+    }
+    const extra = party.broadcast ? " msg-party--broadcast" : "";
+    return `<span class="msg-party${extra}">${inner}</span>`;
+  }
+
+  function senderParty(message) {
+    return {
+      node_id: message.from_id || null,
+      name: message.long_name || message.short_name || message.from_id || "Unknown node",
+      avatarText: avatarTextFor(message.short_name, message.long_name, message.from_id),
+      avatar_bg: message.avatar_bg,
+      avatar_fg: message.avatar_fg,
+    };
+  }
+
+  function recipientParty(message) {
+    if (isBroadcastTarget(message.to_id)) {
+      return { broadcast: true, name: "Everyone", avatarText: "ALL" };
+    }
+    const node = message.to_node;
+    if (node) {
+      return {
+        node_id: node.node_id || null,
+        name: node.long_name || node.short_name || node.node_id || "Unknown node",
+        avatarText: avatarTextFor(node.short_name, node.long_name, node.node_id),
+        avatar_bg: node.avatar_bg,
+        avatar_fg: node.avatar_fg,
+      };
+    }
+    if (message.to_id !== null && message.to_id !== undefined && message.to_id !== "") {
+      return {
+        name: String(message.to_id),
+        avatarText: avatarTextFor(null, null, String(message.to_id)),
+      };
+    }
+    return null;
+  }
+
+  function renderReplyQuote(message) {
+    if (message.reply_id === null || message.reply_id === undefined) return "";
+    const parent = message.reply_to;
+    if (parent) {
+      const parentName = parent.long_name || parent.short_name || parent.from_id || "Unknown node";
+      const parentText = parent.text || "(no text content)";
+      return `<button type="button" class="msg-quote" ` +
+        `data-message-id="${escapeHtml(String(parent.id))}">` +
+        `<span class="msg-quote__bar" aria-hidden="true"></span>` +
+        `<span class="msg-quote__main">` +
+        `<span class="msg-quote__label">In reply to ${escapeHtml(parentName)}</span>` +
+        `<span class="msg-quote__text">${escapeHtml(parentText)}</span>` +
+        `</span>` +
+        `<span class="msg-quote__go" aria-hidden="true">↗</span>` +
+        `</button>`;
+    }
+    return `<div class="msg-quote msg-quote--missing">` +
+      `<span class="msg-quote__bar" aria-hidden="true"></span>` +
+      `<span class="msg-quote__main">` +
+      `<span class="msg-quote__label">In reply to packet #${escapeHtml(String(message.reply_id))}</span>` +
+      `<span class="msg-quote__text">Original message not in stored history</span>` +
+      `</span>` +
+      `</div>`;
+  }
+
+  function renderMsgContent(message) {
+    const kind = messageKind(message);
+    if (message.is_tapback) {
+      return `<div class="msg-content msg-content--tapback">` +
+        `<span class="msg-content__emoji">${escapeHtml(message.text || "·")}</span>` +
+        `<span class="msg-content__kind">${escapeHtml(kind)}</span>` +
+        `</div>`;
+    }
+    const text = message.text;
+    const textHtml = text
+      ? `<div class="msg-content__text">${escapeHtml(text)}</div>`
+      : `<div class="msg-content__text msg-content__text--empty">No text payload</div>`;
+    return `<div class="msg-content">` +
+      `<span class="msg-content__kind">${escapeHtml(kind)}</span>` +
+      textHtml +
+      `</div>`;
+  }
+
   function renderMessageDetail(message) {
     const avatar = document.getElementById("message-modal-avatar");
     const titleName = document.getElementById("message-modal-name");
     const titleSub = document.getElementById("message-modal-sub");
     const body = document.getElementById("message-modal-body");
 
-    const senderName = message.long_name || message.short_name || message.from_id || "Unknown node";
-    const avatarText = avatarTextFor(message.short_name, message.long_name, message.from_id);
+    const sender = senderParty(message);
 
-    if (titleName) titleName.textContent = senderName;
-    if (titleSub) titleSub.textContent = message.from_id || "";
+    if (titleName) titleName.textContent = messageKind(message);
+    if (titleSub) titleSub.textContent = "Message #" + (message.id ?? "");
     if (avatar) {
-      avatar.textContent = avatarText;
-      avatar.className = avatarLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
+      avatar.textContent = sender.avatarText;
+      avatar.className = avatarLength(sender.avatarText) >= 4 ? "avatar avatar--small" : "avatar";
       const style = [];
       if (message.avatar_bg) style.push(`background: ${message.avatar_bg}`);
       if (message.avatar_fg) style.push(`color: ${message.avatar_fg}`);
@@ -407,29 +503,30 @@
       ? `Channel ${message.channel_index}`
       : (message.channel_key ? `Key ${message.channel_key}` : null);
 
-    const content =
-      row("Type", messageKind(message)) +
-      row("Text", message.text) +
-      row("Channel", channelLabel) +
-      row("Received", formatTimeWithRelative(message.rx_time));
+    const recipient = recipientParty(message);
+    const routeHtml = `<div class="msg-route">` +
+      renderMsgParty(sender) +
+      (recipient
+        ? `<span class="msg-route__arrow" aria-hidden="true">→</span>` + renderMsgParty(recipient)
+        : "") +
+      `</div>`;
 
-    let replyContent = "";
-    if (message.reply_id !== null && message.reply_id !== undefined) {
-      const parent = message.reply_to;
-      if (parent) {
-        const parentName = parent.long_name || parent.short_name || parent.from_id || "Unknown node";
-        replyContent =
-          row("From", parentName) +
-          row("Message", parent.text) +
-          row("Received", formatTimeWithRelative(parent.rx_time));
-      } else {
-        replyContent = row("Packet", `#${message.reply_id} (not in stored history)`);
-      }
-    }
+    const captionParts = [];
+    if (channelLabel) captionParts.push(channelLabel);
+    const received = formatTimeWithRelative(message.rx_time);
+    if (received && received !== "-") captionParts.push(received);
+    const captionHtml = captionParts.length
+      ? `<div class="msg-caption">${captionParts.map(escapeHtml).join(" · ")}</div>`
+      : "";
+
+    const convo = `<div class="msg-convo">` +
+      routeHtml +
+      renderReplyQuote(message) +
+      renderMsgContent(message) +
+      captionHtml +
+      `</div>`;
 
     const routing =
-      row("From", message.from_id) +
-      row("To", recipientLabel(message.to_id)) +
       row("Hops away", formatValue(message.hops)) +
       row("Hop start", formatValue(raw.hopStart)) +
       row("Hop limit", formatValue(raw.hopLimit)) +
@@ -453,16 +550,13 @@
       row("Payload (hex)", decoded.payload);
 
     const sections = [
-      ["Message", content],
-      ["In reply to", replyContent],
       ["Routing", routing],
       ["Signal", signal],
       ["Packet", packet],
     ];
 
-    const html = renderSections(sections);
     if (body) {
-      body.innerHTML = html || '<p class="muted">No data recorded for this message.</p>';
+      body.innerHTML = convo + renderSections(sections);
     }
   }
 
@@ -510,13 +604,19 @@
 
     // Delegated click handling so dynamically-rendered rows work too
     document.addEventListener("click", function (event) {
-      const nodeButton = event.target.closest(".node-button");
-      if (nodeButton) {
-        const id = nodeButton.dataset.nodeId;
+      const nodeRef = event.target.closest(".node-button, .msg-party--link");
+      if (nodeRef) {
+        const id = nodeRef.dataset.nodeId;
         if (id) {
           event.preventDefault();
           showNodeModal(id);
         }
+        return;
+      }
+      const quote = event.target.closest(".msg-quote[data-message-id]");
+      if (quote) {
+        event.preventDefault();
+        showMessageModal(quote.dataset.messageId);
         return;
       }
       const bubble = event.target.closest(".bubble[data-message-id]");
