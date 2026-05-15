@@ -184,28 +184,26 @@
 
   // ---------- Modal ----------
   let lastFocus = null;
+  let openModalEl = null;
 
-  function getModal() {
-    return document.getElementById("node-modal");
-  }
-
-  function openModal() {
-    const modal = getModal();
+  function openModal(modal) {
     if (!modal) return;
     lastFocus = document.activeElement;
     modal.classList.add("is-open");
     modal.setAttribute("aria-hidden", "false");
     document.body.style.overflow = "hidden";
+    openModalEl = modal;
     const close = modal.querySelector(".modal__close");
     if (close) close.focus();
   }
 
-  function closeModal() {
-    const modal = getModal();
+  function closeModal(modal) {
+    modal = modal || openModalEl;
     if (!modal) return;
     modal.classList.remove("is-open");
     modal.setAttribute("aria-hidden", "true");
     document.body.style.overflow = "";
+    if (openModalEl === modal) openModalEl = null;
     if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
   }
 
@@ -226,6 +224,18 @@
   function row(label, value) {
     if (value === undefined || value === null || value === "" || value === "-") return "";
     return `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd>`;
+  }
+
+  function renderSections(sections) {
+    return sections
+      .filter(([_, content]) => content && content.trim().length)
+      .map(([title, content]) =>
+        `<div class="modal__section">` +
+        `<h3 class="modal__section-title">${escapeHtml(title)}</h3>` +
+        `<dl class="detail-grid">${content}</dl>` +
+        `</div>`
+      )
+      .join("");
   }
 
   function renderDetail(node) {
@@ -309,15 +319,7 @@
       ["Position", position],
     ];
 
-    const html = sections
-      .filter(([_, content]) => content && content.trim().length)
-      .map(([title, content]) =>
-        `<div class="modal__section">` +
-        `<h3 class="modal__section-title">${escapeHtml(title)}</h3>` +
-        `<dl class="detail-grid">${content}</dl>` +
-        `</div>`
-      )
-      .join("");
+    const html = renderSections(sections);
 
     if (body) {
       body.innerHTML = html || '<p class="muted">No data recorded for this node yet.</p>';
@@ -326,7 +328,7 @@
 
   async function showNodeModal(nodeId) {
     if (!nodeId) return;
-    openModal();
+    openModal(document.getElementById("node-modal"));
     setModalLoading(nodeId);
     try {
       const response = await fetch(`/api/nodes/${encodeURIComponent(nodeId)}`, { cache: "no-store" });
@@ -349,29 +351,188 @@
     }
   }
 
+  // ---------- Message modal ----------
+  function recipientLabel(toId) {
+    if (toId === null || toId === undefined || toId === "") return null;
+    const s = String(toId);
+    if (s === "^all" || s === "4294967295" || s === "!ffffffff") return "Broadcast (^all)";
+    return s;
+  }
+
+  function messageKind(message) {
+    if (message.is_tapback) return "Tapback reaction";
+    if (message.reply_id !== null && message.reply_id !== undefined) return "Reply";
+    return "Text message";
+  }
+
+  function setMessageModalLoading() {
+    const titleName = document.getElementById("message-modal-name");
+    const titleSub = document.getElementById("message-modal-sub");
+    const avatar = document.getElementById("message-modal-avatar");
+    const body = document.getElementById("message-modal-body");
+    if (titleName) titleName.textContent = "Loading…";
+    if (titleSub) titleSub.textContent = "";
+    if (avatar) {
+      avatar.textContent = "…";
+      avatar.removeAttribute("style");
+    }
+    if (body) body.innerHTML = '<p class="muted">Fetching message details…</p>';
+  }
+
+  function renderMessageDetail(message) {
+    const avatar = document.getElementById("message-modal-avatar");
+    const titleName = document.getElementById("message-modal-name");
+    const titleSub = document.getElementById("message-modal-sub");
+    const body = document.getElementById("message-modal-body");
+
+    const senderName = message.long_name || message.short_name || message.from_id || "Unknown node";
+    const avatarText = avatarTextFor(message.short_name, message.long_name, message.from_id);
+
+    if (titleName) titleName.textContent = senderName;
+    if (titleSub) titleSub.textContent = message.from_id || "";
+    if (avatar) {
+      avatar.textContent = avatarText;
+      avatar.className = avatarLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
+      const style = [];
+      if (message.avatar_bg) style.push(`background: ${message.avatar_bg}`);
+      if (message.avatar_fg) style.push(`color: ${message.avatar_fg}`);
+      if (style.length) avatar.setAttribute("style", style.join("; "));
+      else avatar.removeAttribute("style");
+    }
+
+    const decoded = message.decoded || {};
+    const raw = message.raw || {};
+
+    const channelLabel = message.channel_index !== null && message.channel_index !== undefined
+      ? `Channel ${message.channel_index}`
+      : (message.channel_key ? `Key ${message.channel_key}` : null);
+
+    const content =
+      row("Type", messageKind(message)) +
+      row("Text", message.text) +
+      row("Channel", channelLabel) +
+      row("Received", formatTimeWithRelative(message.rx_time));
+
+    let replyContent = "";
+    if (message.reply_id !== null && message.reply_id !== undefined) {
+      const parent = message.reply_to;
+      if (parent) {
+        const parentName = parent.long_name || parent.short_name || parent.from_id || "Unknown node";
+        replyContent =
+          row("From", parentName) +
+          row("Message", parent.text) +
+          row("Received", formatTimeWithRelative(parent.rx_time));
+      } else {
+        replyContent = row("Packet", `#${message.reply_id} (not in stored history)`);
+      }
+    }
+
+    const routing =
+      row("From", message.from_id) +
+      row("To", recipientLabel(message.to_id)) +
+      row("Hops away", formatValue(message.hops)) +
+      row("Hop start", formatValue(raw.hopStart)) +
+      row("Hop limit", formatValue(raw.hopLimit)) +
+      row("Relay node", formatValue(raw.relayNode)) +
+      row("Transport", raw.transportMechanism) +
+      row("Priority", raw.priority);
+
+    const signal =
+      row("RSSI", formatValueUnit(message.rx_rssi, "dBm")) +
+      row("SNR", formatValue(message.rx_snr));
+
+    const emojiFlag = message.emoji !== null && message.emoji !== undefined
+      ? formatValue(message.emoji) : null;
+    const packet =
+      row("Message DB id", message.id) +
+      row("Mesh packet id", message.packet_id) +
+      row("Port", message.portnum || decoded.portnum) +
+      row("Bitfield", formatValue(decoded.bitfield)) +
+      row("Emoji flag", emojiFlag) +
+      row("Reply-to packet id", message.reply_id) +
+      row("Payload (hex)", decoded.payload);
+
+    const sections = [
+      ["Message", content],
+      ["In reply to", replyContent],
+      ["Routing", routing],
+      ["Signal", signal],
+      ["Packet", packet],
+    ];
+
+    const html = renderSections(sections);
+    if (body) {
+      body.innerHTML = html || '<p class="muted">No data recorded for this message.</p>';
+    }
+  }
+
+  async function showMessageModal(messageId) {
+    if (messageId === null || messageId === undefined || messageId === "") return;
+    openModal(document.getElementById("message-modal"));
+    setMessageModalLoading();
+    try {
+      const response = await fetch(`/api/message/${encodeURIComponent(messageId)}`, { cache: "no-store" });
+      const titleName = document.getElementById("message-modal-name");
+      const body = document.getElementById("message-modal-body");
+      if (!response.ok) {
+        if (titleName) titleName.textContent = "Message";
+        if (body) {
+          body.innerHTML = response.status === 404
+            ? '<p class="muted">No record for this message.</p>'
+            : `<p class="muted">Failed to load message (${response.status}).</p>`;
+        }
+        return;
+      }
+      const payload = await response.json();
+      if (payload && payload.message) renderMessageDetail(payload.message);
+    } catch (err) {
+      const body = document.getElementById("message-modal-body");
+      if (body) body.innerHTML = '<p class="muted">Network error loading message.</p>';
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
-    const modal = getModal();
-    if (modal) {
+    const modals = [
+      document.getElementById("node-modal"),
+      document.getElementById("message-modal"),
+    ];
+    modals.forEach(function (modal) {
+      if (!modal) return;
       modal.addEventListener("click", function (event) {
-        if (event.target === modal) closeModal();
+        if (event.target === modal) closeModal(modal);
       });
       const close = modal.querySelector(".modal__close");
-      if (close) close.addEventListener("click", closeModal);
-    }
+      if (close) close.addEventListener("click", function () { closeModal(modal); });
+    });
     document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape" && modal && modal.classList.contains("is-open")) {
-        closeModal();
-      }
+      if (event.key === "Escape" && openModalEl) closeModal(openModalEl);
     });
 
     // Delegated click handling so dynamically-rendered rows work too
     document.addEventListener("click", function (event) {
-      const button = event.target.closest(".node-button");
-      if (!button) return;
-      const id = button.dataset.nodeId;
-      if (id) {
+      const nodeButton = event.target.closest(".node-button");
+      if (nodeButton) {
+        const id = nodeButton.dataset.nodeId;
+        if (id) {
+          event.preventDefault();
+          showNodeModal(id);
+        }
+        return;
+      }
+      const bubble = event.target.closest(".bubble[data-message-id]");
+      if (bubble) {
         event.preventDefault();
-        showNodeModal(id);
+        showMessageModal(bubble.dataset.messageId);
+      }
+    });
+
+    // Keyboard activation for focused message bubbles
+    document.addEventListener("keydown", function (event) {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const target = event.target;
+      if (target && target.classList && target.classList.contains("bubble") && target.dataset.messageId) {
+        event.preventDefault();
+        showMessageModal(target.dataset.messageId);
       }
     });
   });
@@ -389,6 +550,7 @@
     renderBattery,
     batteryInfo,
     showNodeModal,
+    showMessageModal,
     isLive,
     LIVE_THRESHOLD_SECONDS,
   };

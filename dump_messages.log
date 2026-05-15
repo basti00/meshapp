@@ -1,0 +1,531 @@
+# Listening on /dev/ttyACM0 for 180s ...
+# (real text messages, telemetry/position/etc., and encrypted packets)
+** device connected **
+
+======================================================================
+#1  [NODEINFO_APP]  +   8.4s
+======================================================================
+from        : None  (raw from=2345276475)
+to          : '^all'  (raw to=4294967295)
+portnum     : 'NODEINFO_APP'
+channel     : index=None channel=None
+rxTime      : 1778876661
+rxRssi/rxSnr: -45 / 7.0
+hopLimit    : None  hopStart=3
+top-level keys : ['from', 'to', 'decoded', 'id', 'rxTime', 'rxSnr', 'rxRssi', 'hopStart', 'relayNode', 'transportMechanism', 'raw', 'fromId', 'toId']
+decoded keys   : ['portnum', 'payload', 'bitfield', 'user']
+--- full packet ---
+{
+  "from": 2345276475,
+  "to": 4294967295,
+  "decoded": {
+    "portnum": "NODEINFO_APP",
+    "payload": "0a09213862636131343362120d4e6f4f6e6520547261636b65721a04f09f93b12206eb2f8bca143b28473801422005e3ab96d69c857ef174c94b41bce625b127d2d57bd0a65b3c2ab39e6d05b6594800",
+    "bitfield": 0,
+    "user": {
+      "id": "!8bca143b",
+      "longName": "NoOne Tracker",
+      "shortName": "\ud83d\udcf1",
+      "macaddr": "6y+LyhQ7",
+      "hwModel": "TRACKER_T1000_E",
+      "role": "CLIENT_MUTE",
+      "publicKey": "BeOrltachX7xdMlLQbzmJbEn0tV70KZbPCqznm0Ftlk=",
+      "isUnmessagable": false,
+      "raw": "id: \"!8bca143b\"\nlong_name: \"NoOne Tracker\"\nshort_name: \"\ud83d\udcf1\"\nmacaddr: \"\\353/\\213\\312\\024;\"\nhw_model: TRACKER_T1000_E\nrole: CLIENT_MUTE\npublic_key: \"\\005\\343\\253\\226\\326\\234\\205~\\361t\\311KA\\274\\346%\\261\\'\\322\\325{\\320\\246[<*\\263\\236m\\005\\266Y\"\nis_unmessagable: false\n"
+    }
+  },
+  "id": 3037148477,
+  "rxTime": 1778876661,
+  "rxSnr": 7.0,
+  "rxRssi": -45,
+  "hopStart": 3,
+  "relayNode": 197,
+  "transportMechanism": "TRANSPORT_LORA",
+  "raw": "from: 2345276475\nto: 4294967295\ndecoded {\n  portnum: NODEINFO_APP\n  payload: \"\\n\\t!8bca143b\\022\\rNoOne Tracker\\032\\004\\360\\237\\223\\261\\\"\\006\\353/\\213\\312\\024;(G8\\001B \\005\\343\\253\\226\\326\\234\\205~\\361t\\311KA\\274\\346%\\261\\'\\322\\325{\\320\\246[<*\\263\\236m\\005\\266YH\\000\"\n  bitfield: 0\n}\nid: 3037148477\nrx_time: 1778876661\nrx_snr: 7\nrx_rssi: -45\nhop_start: 3\nrelay_node: 197\ntransport_mechanism: TRANSPORT_LORA\n",
+  "fromId": null,
+  "toId": "^all"
+}
+
+======================================================================
+#2  [TELEMETRY_APP]  +  18.2s
+======================================================================
+from        : '!f3ebbd86'  (raw from=4092312966)
+to          : '^all'  (raw to=4294967295)
+portnum     : 'TELEMETRY_APP'
+channel     : index=None channel=None
+rxTime      : 1778876672
+rxRssi/rxSnr: None / None
+hopLimit    : 7  hopStart=None
+top-level keys : ['from', 'to', 'decoded', 'id', 'rxTime', 'hopLimit', 'priority', 'raw', 'fromId', 'toId']
+decoded keys   : ['portnum', 'payload', 'telemetry']
+--- full packet ---
+{
+  "from": 4092312966,
+  "to": 4294967295,
+  "decoded": {
+    "portnum": "TELEMETRY_APP",
+    "payload": "0d0081076a1215086515d57885401da370114125ea26e53f2888960c",
+    "telemetry": {
+      "time": 1778876672,
+      "deviceMetrics": {
+        "batteryLevel": 101,
+        "voltage": 4.171,
+        "channelUtilization": 9.089999,
+        "airUtilTx": 1.7902501,
+        "uptimeSeconds": 199432
+      },
+      "raw": "time: 1778876672\ndevice_metrics {\n  battery_level: 101\n  voltage: 4.171\n  channel_utilization: 9.0899992\n  air_util_tx: 1.79025006\n  uptime_seconds: 199432\n}\n"
+    }
+  },
+  "id": 1992602323,
+  "rxTime": 1778876672,
+  "hopLimit": 7,
+  "priority": "BACKGROUND",
+  "raw": "from: 4092312966\nto: 4294967295\ndecoded {\n  portnum: TELEMETRY_APP\n  payload: \"\\r\\000\\201\\007j\\022\\025\\010e\\025\\325x\\205@\\035\\243p\\021A%\\352&\\345?(\\210\\226\\014\"\n}\nid: 1992602323\nrx_time: 1778876672\nhop_limit: 7\npriority: BACKGROUND\n",
+  "fromId": "!f3ebbd86",
+  "toId": "^all"
+}
+
+======================================================================
+#3  [POSITION_APP]  +  19.6s
+======================================================================
+from        : None  (raw from=2885291988)
+to          : '^all'  (raw to=4294967295)
+portnum     : 'POSITION_APP'
+channel     : index=None channel=None
+rxTime      : 1778876673
+rxRssi/rxSnr: -46 / 6.5
+hopLimit    : None  hopStart=5
+top-level keys : ['from', 'to', 'decoded', 'id', 'rxTime', 'rxSnr', 'rxRssi', 'hopStart', 'relayNode', 'transportMechanism', 'raw', 'fromId', 'toId']
+decoded keys   : ['portnum', 'payload', 'bitfield', 'position']
+--- full packet ---
+{
+  "from": 2885291988,
+  "to": 4294967295,
+  "decoded": {
+    "portnum": "POSITION_APP",
+    "payload": "0d00800f1c150080320918d702255782076a280258c50278008001a0cd9410980104b80110",
+    "bitfield": 0,
+    "position": {
+      "latitudeI": 470777856,
+      "longitudeI": 154304512,
+      "altitude": 343,
+      "time": 1778877015,
+      "locationSource": "LOC_INTERNAL",
+      "PDOP": 325,
+      "groundSpeed": 0,
+      "groundTrack": 33892000,
+      "satsInView": 4,
+      "precisionBits": 16,
+      "raw": "latitude_i: 470777856\nlongitude_i: 154304512\naltitude: 343\ntime: 1778877015\nlocation_source: LOC_INTERNAL\nPDOP: 325\nground_speed: 0\nground_track: 33892000\nsats_in_view: 4\nprecision_bits: 16\n",
+      "latitude": 47.0777856,
+      "longitude": 15.4304512
+    }
+  },
+  "id": 3309194037,
+  "rxTime": 1778876673,
+  "rxSnr": 6.5,
+  "rxRssi": -46,
+  "hopStart": 5,
+  "relayNode": 197,
+  "transportMechanism": "TRANSPORT_LORA",
+  "raw": "from: 2885291988\nto: 4294967295\ndecoded {\n  portnum: POSITION_APP\n  payload: \"\\r\\000\\200\\017\\034\\025\\000\\2002\\t\\030\\327\\002%W\\202\\007j(\\002X\\305\\002x\\000\\200\\001\\240\\315\\224\\020\\230\\001\\004\\270\\001\\020\"\n  bitfield: 0\n}\nid: 3309194037\nrx_time: 1778876673\nrx_snr: 6.5\nrx_rssi: -46\nhop_start: 5\nrelay_node: 197\ntransport_mechanism: TRANSPORT_LORA\n",
+  "fromId": null,
+  "toId": "^all"
+}
+
+======================================================================
+#4  [TELEMETRY_APP]  +  28.3s
+======================================================================
+from        : '!dd8191e4'  (raw from=3716256228)
+to          : '^all'  (raw to=4294967295)
+portnum     : 'TELEMETRY_APP'
+channel     : index=None channel=None
+rxTime      : 1778876682
+rxRssi/rxSnr: -34 / 6.25
+hopLimit    : 5  hopStart=5
+top-level keys : ['from', 'to', 'decoded', 'id', 'rxTime', 'rxSnr', 'hopLimit', 'rxRssi', 'hopStart', 'relayNode', 'transportMechanism', 'raw', 'fromId', 'toId']
+decoded keys   : ['portnum', 'payload', 'bitfield', 'telemetry']
+--- full packet ---
+{
+  "from": 3716256228,
+  "to": 4294967295,
+  "decoded": {
+    "portnum": "TELEMETRY_APP",
+    "payload": "0d5582076a1215085815df4f81401dec513c412551467f3f28b1860d",
+    "bitfield": 0,
+    "telemetry": {
+      "time": 1778877013,
+      "deviceMetrics": {
+        "batteryLevel": 88,
+        "voltage": 4.041,
+        "channelUtilization": 11.77,
+        "airUtilTx": 0.9971667,
+        "uptimeSeconds": 213809
+      },
+      "raw": "time: 1778877013\ndevice_metrics {\n  battery_level: 88\n  voltage: 4.041\n  channel_utilization: 11.77\n  air_util_tx: 0.997166693\n  uptime_seconds: 213809\n}\n"
+    }
+  },
+  "id": 2265433725,
+  "rxTime": 1778876682,
+  "rxSnr": 6.25,
+  "hopLimit": 5,
+  "rxRssi": -34,
+  "hopStart": 5,
+  "relayNode": 228,
+  "transportMechanism": "TRANSPORT_LORA",
+  "raw": "from: 3716256228\nto: 4294967295\ndecoded {\n  portnum: TELEMETRY_APP\n  payload: \"\\rU\\202\\007j\\022\\025\\010X\\025\\337O\\201@\\035\\354Q<A%QF\\177?(\\261\\206\\r\"\n  bitfield: 0\n}\nid: 2265433725\nrx_time: 1778876682\nrx_snr: 6.25\nhop_limit: 5\nrx_rssi: -34\nhop_start: 5\nrelay_node: 228\ntransport_mechanism: TRANSPORT_LORA\n",
+  "fromId": "!dd8191e4",
+  "toId": "^all"
+}
+
+======================================================================
+#5  [TELEMETRY_APP]  +  78.2s
+======================================================================
+from        : '!f3ebbd86'  (raw from=4092312966)
+to          : '^all'  (raw to=4294967295)
+portnum     : 'TELEMETRY_APP'
+channel     : index=None channel=None
+rxTime      : 1778876732
+rxRssi/rxSnr: None / None
+hopLimit    : 7  hopStart=None
+top-level keys : ['from', 'to', 'decoded', 'id', 'rxTime', 'hopLimit', 'priority', 'raw', 'fromId', 'toId']
+decoded keys   : ['portnum', 'payload', 'telemetry']
+--- full packet ---
+{
+  "from": 4092312966,
+  "to": 4294967295,
+  "decoded": {
+    "portnum": "TELEMETRY_APP",
+    "payload": "0d3c81076a1215086515d34d86401dec51dc40259a73e03f28c4960c",
+    "telemetry": {
+      "time": 1778876732,
+      "deviceMetrics": {
+        "batteryLevel": 101,
+        "voltage": 4.197,
+        "channelUtilization": 6.885,
+        "airUtilTx": 1.7535279,
+        "uptimeSeconds": 199492
+      },
+      "raw": "time: 1778876732\ndevice_metrics {\n  battery_level: 101\n  voltage: 4.197\n  channel_utilization: 6.885\n  air_util_tx: 1.75352788\n  uptime_seconds: 199492\n}\n"
+    }
+  },
+  "id": 3520726740,
+  "rxTime": 1778876732,
+  "hopLimit": 7,
+  "priority": "BACKGROUND",
+  "raw": "from: 4092312966\nto: 4294967295\ndecoded {\n  portnum: TELEMETRY_APP\n  payload: \"\\r<\\201\\007j\\022\\025\\010e\\025\\323M\\206@\\035\\354Q\\334@%\\232s\\340?(\\304\\226\\014\"\n}\nid: 3520726740\nrx_time: 1778876732\nhop_limit: 7\npriority: BACKGROUND\n",
+  "fromId": "!f3ebbd86",
+  "toId": "^all"
+}
+
+======================================================================
+#6  [POSITION_APP]  +  96.1s
+======================================================================
+from        : '!b2cadf85'  (raw from=2999639941)
+to          : '^all'  (raw to=4294967295)
+portnum     : 'POSITION_APP'
+channel     : index=None channel=None
+rxTime      : 1778876749
+rxRssi/rxSnr: -11 / 6.5
+hopLimit    : None  hopStart=5
+top-level keys : ['from', 'to', 'decoded', 'id', 'rxTime', 'rxSnr', 'rxRssi', 'hopStart', 'relayNode', 'transportMechanism', 'raw', 'fromId', 'toId']
+decoded keys   : ['portnum', 'payload', 'bitfield', 'position']
+--- full packet ---
+{
+  "from": 2999639941,
+  "to": 4294967295,
+  "decoded": {
+    "portnum": "POSITION_APP",
+    "payload": "0d00000f1c150000330918ae0225a182076a28025894077802800100980106b8010f",
+    "bitfield": 1,
+    "position": {
+      "latitudeI": 470745088,
+      "longitudeI": 154337280,
+      "altitude": 302,
+      "time": 1778877089,
+      "locationSource": "LOC_INTERNAL",
+      "PDOP": 916,
+      "groundSpeed": 2,
+      "groundTrack": 0,
+      "satsInView": 6,
+      "precisionBits": 15,
+      "raw": "latitude_i: 470745088\nlongitude_i: 154337280\naltitude: 302\ntime: 1778877089\nlocation_source: LOC_INTERNAL\nPDOP: 916\nground_speed: 2\nground_track: 0\nsats_in_view: 6\nprecision_bits: 15\n",
+      "latitude": 47.0745088,
+      "longitude": 15.433728
+    }
+  },
+  "id": 2677938799,
+  "rxTime": 1778876749,
+  "rxSnr": 6.5,
+  "rxRssi": -11,
+  "hopStart": 5,
+  "relayNode": 197,
+  "transportMechanism": "TRANSPORT_LORA",
+  "raw": "from: 2999639941\nto: 4294967295\ndecoded {\n  portnum: POSITION_APP\n  payload: \"\\r\\000\\000\\017\\034\\025\\000\\0003\\t\\030\\256\\002%\\241\\202\\007j(\\002X\\224\\007x\\002\\200\\001\\000\\230\\001\\006\\270\\001\\017\"\n  bitfield: 1\n}\nid: 2677938799\nrx_time: 1778876749\nrx_snr: 6.5\nrx_rssi: -11\nhop_start: 5\nrelay_node: 197\ntransport_mechanism: TRANSPORT_LORA\n",
+  "fromId": "!b2cadf85",
+  "toId": "^all"
+}
+
+======================================================================
+#7  [TELEMETRY_APP]  + 115.7s
+======================================================================
+from        : '!b475fec0'  (raw from=3027631808)
+to          : '^all'  (raw to=4294967295)
+portnum     : 'TELEMETRY_APP'
+channel     : index=None channel=None
+rxTime      : 1778876769
+rxRssi/rxSnr: -68 / 1.5
+hopLimit    : 4  hopStart=7
+top-level keys : ['from', 'to', 'decoded', 'id', 'rxTime', 'rxSnr', 'hopLimit', 'rxRssi', 'hopStart', 'relayNode', 'transportMechanism', 'raw', 'fromId', 'toId']
+decoded keys   : ['portnum', 'payload', 'bitfield', 'telemetry']
+--- full packet ---
+{
+  "from": 3027631808,
+  "to": 4294967295,
+  "decoded": {
+    "portnum": "TELEMETRY_APP",
+    "payload": "0db182076a1216085b15045682401d0e749041256ce78f3f28eb8bfd04",
+    "bitfield": 0,
+    "telemetry": {
+      "time": 1778877105,
+      "deviceMetrics": {
+        "batteryLevel": 91,
+        "voltage": 4.073,
+        "channelUtilization": 18.056667,
+        "airUtilTx": 1.1242499,
+        "uptimeSeconds": 10438123
+      },
+      "raw": "time: 1778877105\ndevice_metrics {\n  battery_level: 91\n  voltage: 4.073\n  channel_utilization: 18.0566673\n  air_util_tx: 1.12424994\n  uptime_seconds: 10438123\n}\n"
+    }
+  },
+  "id": 526108693,
+  "rxTime": 1778876769,
+  "rxSnr": 1.5,
+  "hopLimit": 4,
+  "rxRssi": -68,
+  "hopStart": 7,
+  "relayNode": 61,
+  "transportMechanism": "TRANSPORT_LORA",
+  "raw": "from: 3027631808\nto: 4294967295\ndecoded {\n  portnum: TELEMETRY_APP\n  payload: \"\\r\\261\\202\\007j\\022\\026\\010[\\025\\004V\\202@\\035\\016t\\220A%l\\347\\217?(\\353\\213\\375\\004\"\n  bitfield: 0\n}\nid: 526108693\nrx_time: 1778876769\nrx_snr: 1.5\nhop_limit: 4\nrx_rssi: -68\nhop_start: 7\nrelay_node: 61\ntransport_mechanism: TRANSPORT_LORA\n",
+  "fromId": "!b475fec0",
+  "toId": "^all"
+}
+
+======================================================================
+#8  [TEXT]  + 132.3s
+======================================================================
+from        : '!566cecc5'  (raw from=1449979077)
+to          : '^all'  (raw to=4294967295)
+portnum     : 'TEXT_MESSAGE_APP'
+channel     : index=None channel=1
+rxTime      : 1778876786
+rxRssi/rxSnr: -12 / 6.25
+hopLimit    : 6  hopStart=6
+top-level keys : ['from', 'to', 'channel', 'decoded', 'id', 'rxTime', 'rxSnr', 'hopLimit', 'rxRssi', 'hopStart', 'relayNode', 'transportMechanism', 'raw', 'fromId', 'toId']
+decoded keys   : ['portnum', 'payload', 'bitfield', 'text']
+--- full packet ---
+{
+  "from": 1449979077,
+  "to": 4294967295,
+  "channel": 1,
+  "decoded": {
+    "portnum": "TEXT_MESSAGE_APP",
+    "payload": "74657374206d6573736167652032",
+    "bitfield": 0,
+    "text": "test message 2"
+  },
+  "id": 2648614163,
+  "rxTime": 1778876786,
+  "rxSnr": 6.25,
+  "hopLimit": 6,
+  "rxRssi": -12,
+  "hopStart": 6,
+  "relayNode": 197,
+  "transportMechanism": "TRANSPORT_LORA",
+  "raw": "from: 1449979077\nto: 4294967295\nchannel: 1\ndecoded {\n  portnum: TEXT_MESSAGE_APP\n  payload: \"test message 2\"\n  bitfield: 0\n}\nid: 2648614163\nrx_time: 1778876786\nrx_snr: 6.25\nhop_limit: 6\nrx_rssi: -12\nhop_start: 6\nrelay_node: 197\ntransport_mechanism: TRANSPORT_LORA\n",
+  "fromId": "!566cecc5",
+  "toId": "^all"
+}
+
+======================================================================
+#9  [TELEMETRY_APP]  + 138.2s
+======================================================================
+from        : '!f3ebbd86'  (raw from=4092312966)
+to          : '^all'  (raw to=4294967295)
+portnum     : 'TELEMETRY_APP'
+channel     : index=None channel=None
+rxTime      : 1778876792
+rxRssi/rxSnr: None / None
+hopLimit    : 7  hopStart=None
+top-level keys : ['from', 'to', 'decoded', 'id', 'rxTime', 'hopLimit', 'priority', 'raw', 'fromId', 'toId']
+decoded keys   : ['portnum', 'payload', 'telemetry']
+--- full packet ---
+{
+  "from": 4092312966,
+  "to": 4294967295,
+  "decoded": {
+    "portnum": "TELEMETRY_APP",
+    "payload": "0d7881076a12150865152db285401d7eb1144125f89ae33f2880970c",
+    "telemetry": {
+      "time": 1778876792,
+      "deviceMetrics": {
+        "batteryLevel": 101,
+        "voltage": 4.178,
+        "channelUtilization": 9.293333,
+        "airUtilTx": 1.7781668,
+        "uptimeSeconds": 199552
+      },
+      "raw": "time: 1778876792\ndevice_metrics {\n  battery_level: 101\n  voltage: 4.178\n  channel_utilization: 9.29333305\n  air_util_tx: 1.77816677\n  uptime_seconds: 199552\n}\n"
+    }
+  },
+  "id": 2335455957,
+  "rxTime": 1778876792,
+  "hopLimit": 7,
+  "priority": "BACKGROUND",
+  "raw": "from: 4092312966\nto: 4294967295\ndecoded {\n  portnum: TELEMETRY_APP\n  payload: \"\\rx\\201\\007j\\022\\025\\010e\\025-\\262\\205@\\035~\\261\\024A%\\370\\232\\343?(\\200\\227\\014\"\n}\nid: 2335455957\nrx_time: 1778876792\nhop_limit: 7\npriority: BACKGROUND\n",
+  "fromId": "!f3ebbd86",
+  "toId": "^all"
+}
+
+======================================================================
+#10  [POSITION_APP]  + 147.6s
+======================================================================
+from        : '!9e9adaac'  (raw from=2660948652)
+to          : '^all'  (raw to=4294967295)
+portnum     : 'POSITION_APP'
+channel     : index=None channel=None
+rxTime      : 1778876801
+rxRssi/rxSnr: -70 / -0.5
+hopLimit    : None  hopStart=3
+top-level keys : ['from', 'to', 'decoded', 'id', 'rxTime', 'rxSnr', 'rxRssi', 'hopStart', 'relayNode', 'transportMechanism', 'raw', 'fromId', 'toId']
+decoded keys   : ['portnum', 'payload', 'bitfield', 'position']
+--- full packet ---
+{
+  "from": 2660948652,
+  "to": 4294967295,
+  "decoded": {
+    "portnum": "POSITION_APP",
+    "payload": "0d00000c1c150000340918ca0225d582076a28017800800100b8010d",
+    "bitfield": 0,
+    "position": {
+      "latitudeI": 470548480,
+      "longitudeI": 154402816,
+      "altitude": 330,
+      "time": 1778877141,
+      "locationSource": "LOC_MANUAL",
+      "groundSpeed": 0,
+      "groundTrack": 0,
+      "precisionBits": 13,
+      "raw": "latitude_i: 470548480\nlongitude_i: 154402816\naltitude: 330\ntime: 1778877141\nlocation_source: LOC_MANUAL\nground_speed: 0\nground_track: 0\nprecision_bits: 13\n",
+      "latitude": 47.054848,
+      "longitude": 15.4402816
+    }
+  },
+  "id": 3146116518,
+  "rxTime": 1778876801,
+  "rxSnr": -0.5,
+  "rxRssi": -70,
+  "hopStart": 3,
+  "relayNode": 61,
+  "transportMechanism": "TRANSPORT_LORA",
+  "raw": "from: 2660948652\nto: 4294967295\ndecoded {\n  portnum: POSITION_APP\n  payload: \"\\r\\000\\000\\014\\034\\025\\000\\0004\\t\\030\\312\\002%\\325\\202\\007j(\\001x\\000\\200\\001\\000\\270\\001\\r\"\n  bitfield: 0\n}\nid: 3146116518\nrx_time: 1778876801\nrx_snr: -0.5\nrx_rssi: -70\nhop_start: 3\nrelay_node: 61\ntransport_mechanism: TRANSPORT_LORA\n",
+  "fromId": "!9e9adaac",
+  "toId": "^all"
+}
+
+======================================================================
+#11  [TEXT]  + 148.5s
+======================================================================
+from        : '!566cecc5'  (raw from=1449979077)
+to          : '^all'  (raw to=4294967295)
+portnum     : 'TEXT_MESSAGE_APP'
+channel     : index=None channel=1
+rxTime      : 1778876802
+rxRssi/rxSnr: -11 / 6.25
+hopLimit    : 6  hopStart=6
+top-level keys : ['from', 'to', 'channel', 'decoded', 'id', 'rxTime', 'rxSnr', 'hopLimit', 'rxRssi', 'hopStart', 'relayNode', 'transportMechanism', 'raw', 'fromId', 'toId']
+decoded keys   : ['portnum', 'payload', 'replyId', 'bitfield', 'text']
+--- full packet ---
+{
+  "from": 1449979077,
+  "to": 4294967295,
+  "channel": 1,
+  "decoded": {
+    "portnum": "TEXT_MESSAGE_APP",
+    "payload": "5265706c7920746f206d6573736167652032",
+    "replyId": 2648614163,
+    "bitfield": 0,
+    "text": "Reply to message 2"
+  },
+  "id": 247876892,
+  "rxTime": 1778876802,
+  "rxSnr": 6.25,
+  "hopLimit": 6,
+  "rxRssi": -11,
+  "hopStart": 6,
+  "relayNode": 197,
+  "transportMechanism": "TRANSPORT_LORA",
+  "raw": "from: 1449979077\nto: 4294967295\nchannel: 1\ndecoded {\n  portnum: TEXT_MESSAGE_APP\n  payload: \"Reply to message 2\"\n  reply_id: 2648614163\n  bitfield: 0\n}\nid: 247876892\nrx_time: 1778876802\nrx_snr: 6.25\nhop_limit: 6\nrx_rssi: -11\nhop_start: 6\nrelay_node: 197\ntransport_mechanism: TRANSPORT_LORA\n",
+  "fromId": "!566cecc5",
+  "toId": "^all"
+}
+
+======================================================================
+#12  [TEXT]  + 165.5s
+======================================================================
+from        : '!566cecc5'  (raw from=1449979077)
+to          : '^all'  (raw to=4294967295)
+portnum     : 'TEXT_MESSAGE_APP'
+channel     : index=None channel=1
+rxTime      : 1778876819
+rxRssi/rxSnr: -12 / 6.5
+hopLimit    : 6  hopStart=6
+top-level keys : ['from', 'to', 'channel', 'decoded', 'id', 'rxTime', 'rxSnr', 'hopLimit', 'rxRssi', 'hopStart', 'relayNode', 'transportMechanism', 'raw', 'fromId', 'toId']
+decoded keys   : ['portnum', 'payload', 'replyId', 'emoji', 'bitfield', 'text']
+--- full packet ---
+{
+  "from": 1449979077,
+  "to": 4294967295,
+  "channel": 1,
+  "decoded": {
+    "portnum": "TEXT_MESSAGE_APP",
+    "payload": "f09f988a",
+    "replyId": 2648614163,
+    "emoji": 1,
+    "bitfield": 0,
+    "text": "\ud83d\ude0a"
+  },
+  "id": 3928239251,
+  "rxTime": 1778876819,
+  "rxSnr": 6.5,
+  "hopLimit": 6,
+  "rxRssi": -12,
+  "hopStart": 6,
+  "relayNode": 197,
+  "transportMechanism": "TRANSPORT_LORA",
+  "raw": "from: 1449979077\nto: 4294967295\nchannel: 1\ndecoded {\n  portnum: TEXT_MESSAGE_APP\n  payload: \"\\360\\237\\230\\212\"\n  reply_id: 2648614163\n  emoji: 1\n  bitfield: 0\n}\nid: 3928239251\nrx_time: 1778876819\nrx_snr: 6.5\nhop_limit: 6\nrx_rssi: -12\nhop_start: 6\nrelay_node: 197\ntransport_mechanism: TRANSPORT_LORA\n",
+  "fromId": "!566cecc5",
+  "toId": "^all"
+}
+
+
+######################################################################
+# SUMMARY  (12 packets in 182s)
+######################################################################
+
+By classification:
+  TELEMETRY_APP          5
+  POSITION_APP           3
+  TEXT                   3
+  NODEINFO_APP           1
+
+By portnum:
+  TELEMETRY_APP          5
+  POSITION_APP           3
+  TEXT_MESSAGE_APP       3
+  NODEINFO_APP           1
+
+Real text messages : 3
+Encrypted/undecoded: 0
+Other/status       : 9

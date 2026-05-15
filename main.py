@@ -12,7 +12,7 @@ from flask import Flask, jsonify, redirect, render_template, url_for
 from meshtastic.serial_interface import SerialInterface
 from pubsub import pub
 
-DB_SCHEMA_VERSION = 5
+DB_SCHEMA_VERSION = 6
 DB_PATH = Path(__file__).with_name("meshapp.db")
 DEVICE_PATH = os.environ.get("MESH_DEVICE", "/dev/ttyACM0")
 DEFAULT_CHANNEL_INDEX = int(os.environ.get("MESH_CHANNEL", "0"))
@@ -33,6 +33,15 @@ def _json_default(value):
 
 def _json_dumps(value):
     return json.dumps(value, default=_json_default, ensure_ascii=True)
+
+
+def _safe_json_loads(value):
+    if isinstance(value, str) and value:
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _normalize_timestamp(value):
@@ -255,6 +264,12 @@ NODE_COLUMNS = [
     ("other_count_daily", "INTEGER DEFAULT 0"),
 ]
 
+# Columns added to the messages table after its original schema; kept here so
+# existing databases get migrated via _ensure_columns().
+MESSAGE_COLUMNS = [
+    ("packet_id", "INTEGER"),
+]
+
 # Fields that, once set, must not be overwritten by later upserts.
 PRESERVE_IF_EXISTS = {"first_seen"}
 
@@ -284,6 +299,7 @@ def init_db():
                 text TEXT,
                 rx_rssi REAL,
                 rx_snr REAL,
+                packet_id INTEGER,
                 decoded_json TEXT,
                 raw_json TEXT
             )
@@ -301,8 +317,12 @@ def init_db():
             """
         )
         _ensure_columns(conn, "nodes", NODE_COLUMNS)
+        _ensure_columns(conn, "messages", MESSAGE_COLUMNS)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_channel_key_time ON messages(channel_key, rx_time DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_packet_id ON messages(packet_id)"
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes(last_seen DESC)")
         conn.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
@@ -650,6 +670,7 @@ def handle_packet(packet, interface=None):
             text=message_text,
             rx_rssi=packet.get("rxRssi"),
             rx_snr=packet.get("rxSnr"),
+            packet_id=_coerce_int(packet.get("id")),
             decoded_json=_json_dumps(decoded),
             raw_json=_json_dumps(packet),
         )
@@ -799,6 +820,7 @@ def messages_api(channel_key):
         rows = conn.execute(
             """
             SELECT
+                m.id,
                 m.rx_time,
                 m.channel_index,
                 m.channel_key,
@@ -838,6 +860,59 @@ def messages_default():
 def messages_channel(channel_key):
     channels = _get_available_channels()
     return _render_messages(channel_key, channels)
+
+
+@app.route("/api/message/<int:message_id>")
+def message_detail_api(message_id):
+    with _db_connect() as conn:
+        row = conn.execute(
+            """
+            SELECT m.*, n.short_name, n.long_name
+            FROM messages m
+            LEFT JOIN nodes n ON n.node_id = m.from_id
+            WHERE m.id = ?
+            """,
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            return jsonify({"error": "not found", "message_id": message_id}), 404
+        message = dict(row)
+
+        decoded = _safe_json_loads(message.pop("decoded_json", None))
+        raw = _safe_json_loads(message.pop("raw_json", None))
+        message["decoded"] = decoded
+        message["raw"] = raw
+
+        reply_id = None
+        emoji = None
+        if isinstance(decoded, dict):
+            reply_id = decoded.get("replyId") or decoded.get("reply_id")
+            emoji = decoded.get("emoji")
+        message["reply_id"] = reply_id
+        message["emoji"] = emoji
+        message["is_tapback"] = bool(emoji)
+
+        reply_to = None
+        if reply_id is not None:
+            parent = conn.execute(
+                """
+                SELECT m.id, m.packet_id, m.text, m.from_id, m.rx_time,
+                       n.short_name, n.long_name
+                FROM messages m
+                LEFT JOIN nodes n ON n.node_id = m.from_id
+                WHERE m.packet_id = ?
+                ORDER BY m.rx_time DESC
+                LIMIT 1
+                """,
+                (reply_id,),
+            ).fetchone()
+            if parent is not None:
+                reply_to = dict(parent)
+                reply_to.update(_node_avatar_colors(reply_to.get("from_id")))
+        message["reply_to"] = reply_to
+
+    message.update(_node_avatar_colors(message.get("from_id")))
+    return jsonify({"message": message})
 
 
 @app.route("/nodes")

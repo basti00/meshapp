@@ -19,7 +19,7 @@
       {% set avatar_text_raw = msg.short_name or (msg.long_name[:2] if msg.long_name else (msg.from_id[:2] if msg.from_id else "?")) %}
       {% set avatar_text = avatar_text_raw[:4] | upper %}
       {% set avatar_small = avatar_text | length >= 4 %}
-      <article class="bubble">
+      <article class="bubble bubble--clickable" data-message-id="{{ msg.id }}" tabindex="0" role="button" aria-label="View message details">
         <header class="bubble__header">
           <button type="button" class="node-button" data-node-id="{{ msg.from_id or '' }}">
             <span class="avatar{% if avatar_small %} avatar--small{% endif %}"
@@ -81,8 +81,9 @@
       const body = msg.text
         ? `<div class="bubble__body">${escapeHtml(msg.text)}</div>`
         : `<div class="bubble__body bubble__body--meta"><span class="tag">${escapeHtml(msg.portnum || "unknown")}</span></div>`;
+      const messageId = msg.id !== null && msg.id !== undefined ? msg.id : "";
       return `
-        <article class="bubble">
+        <article class="bubble bubble--clickable" data-message-id="${escapeHtml(messageId)}" tabindex="0" role="button" aria-label="View message details">
           <header class="bubble__header">${nodeBtn}</header>
           ${body}
           <footer class="bubble__footer">

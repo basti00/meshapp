@@ -52,6 +52,20 @@
     </div>
   </div>
 
+  <div id="message-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="message-modal-name" aria-hidden="true">
+    <div class="modal" role="document">
+      <div class="modal__header">
+        <span id="message-modal-avatar" class="avatar" aria-hidden="true">?</span>
+        <div class="modal__title">
+          <span id="message-modal-name" class="modal__title-name">Message</span>
+          <span id="message-modal-sub" class="modal__title-sub"></span>
+        </div>
+        <button type="button" class="modal__close" aria-label="Close">&times;</button>
+      </div>
+      <div id="message-modal-body" class="modal__body"></div>
+    </div>
+  </div>
+
   <script src="{{ url_for('static', filename='app.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
