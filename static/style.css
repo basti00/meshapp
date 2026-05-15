@@ -754,6 +754,56 @@ button.msg-quote:hover .msg-quote__go { color: var(--accent); }
   font-variant-numeric: tabular-nums;
 }
 
+.msg-raw {
+  margin-top: 16px;
+}
+
+.msg-raw__toggle {
+  display: inline-block;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  list-style: none;
+  user-select: none;
+}
+
+.msg-raw__toggle::-webkit-details-marker { display: none; }
+
+.msg-raw__toggle::before {
+  content: "▸ ";
+}
+
+.msg-raw[open] .msg-raw__toggle::before {
+  content: "▾ ";
+}
+
+.msg-raw__text {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  max-height: 320px;
+  resize: vertical;
+  background: var(--panel-hover);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg-raw__text:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }

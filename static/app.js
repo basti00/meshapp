@@ -366,15 +366,8 @@
 
   function setMessageModalLoading() {
     const titleName = document.getElementById("message-modal-name");
-    const titleSub = document.getElementById("message-modal-sub");
-    const avatar = document.getElementById("message-modal-avatar");
     const body = document.getElementById("message-modal-body");
     if (titleName) titleName.textContent = "Loading…";
-    if (titleSub) titleSub.textContent = "";
-    if (avatar) {
-      avatar.textContent = "…";
-      avatar.removeAttribute("style");
-    }
     if (body) body.innerHTML = '<p class="muted">Fetching message details…</p>';
   }
 
@@ -473,24 +466,12 @@
   }
 
   function renderMessageDetail(message) {
-    const avatar = document.getElementById("message-modal-avatar");
     const titleName = document.getElementById("message-modal-name");
-    const titleSub = document.getElementById("message-modal-sub");
     const body = document.getElementById("message-modal-body");
 
     const sender = senderParty(message);
 
     if (titleName) titleName.textContent = messageKind(message);
-    if (titleSub) titleSub.textContent = "Message #" + (message.id ?? "");
-    if (avatar) {
-      avatar.textContent = sender.avatarText;
-      avatar.className = avatarLength(sender.avatarText) >= 4 ? "avatar avatar--small" : "avatar";
-      const style = [];
-      if (message.avatar_bg) style.push(`background: ${message.avatar_bg}`);
-      if (message.avatar_fg) style.push(`color: ${message.avatar_fg}`);
-      if (style.length) avatar.setAttribute("style", style.join("; "));
-      else avatar.removeAttribute("style");
-    }
 
     const decoded = message.decoded || {};
     const raw = message.raw || {};
@@ -512,12 +493,9 @@
         : "") +
       `</div>`;
 
-    const captionParts = [];
-    if (channelLabel) captionParts.push(channelLabel);
     const received = formatTimeWithRelative(message.rx_time);
-    if (received && received !== "-") captionParts.push(received);
-    const captionHtml = captionParts.length
-      ? `<div class="msg-caption">${captionParts.map(escapeHtml).join(" · ")}</div>`
+    const captionHtml = received && received !== "-"
+      ? `<div class="msg-caption">${escapeHtml(received)}</div>`
       : "";
 
     const convo = `<div class="msg-convo">` +
@@ -528,6 +506,7 @@
       `</div>`;
 
     const routing =
+      row("Channel", channelLabel) +
       row("Hops away", formatValue(message.hops)) +
       row("Hop start", formatValue(raw.hopStart)) +
       row("Hop limit", formatValue(raw.hopLimit)) +
@@ -552,8 +531,15 @@
       ["Packet", packet],
     ];
 
+    const rawJson = JSON.stringify(message, null, 2);
+    const rawHtml = `<details class="msg-raw">` +
+      `<summary class="msg-raw__toggle">Raw JSON</summary>` +
+      `<textarea class="msg-raw__text" readonly rows="14" spellcheck="false" ` +
+      `aria-label="Raw message JSON">${escapeHtml(rawJson)}</textarea>` +
+      `</details>`;
+
     if (body) {
-      body.innerHTML = convo + renderSections(sections);
+      body.innerHTML = convo + renderSections(sections) + rawHtml;
     }
   }
 
