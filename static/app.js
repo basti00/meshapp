@@ -79,7 +79,7 @@
     const abs = formatMessageTime(epochSeconds);
     if (abs === "-") return "-";
     const rel = formatRelative(epochSeconds);
-    return rel ? `${abs} (${rel})` : abs;
+    return rel ? `${abs} (${rel} ago)` : abs;
   }
 
   function formatValue(value, digits) {
@@ -439,7 +439,7 @@
     if (parent) {
       const parentName = parent.long_name || parent.short_name || parent.from_id || "Unknown node";
       const parentText = parent.text || "(no text content)";
-      return `<button type="button" class="msg-quote" ` +
+      return `<button type="button" class="msg-quote" title="Go to this message" ` +
         `data-message-id="${escapeHtml(String(parent.id))}">` +
         `<span class="msg-quote__bar" aria-hidden="true"></span>` +
         `<span class="msg-quote__main">` +
@@ -459,21 +459,17 @@
   }
 
   function renderMsgContent(message) {
-    const kind = messageKind(message);
     if (message.is_tapback) {
       return `<div class="msg-content msg-content--tapback">` +
+        `<span class="msg-content__kind">Reacted with</span>` +
         `<span class="msg-content__emoji">${escapeHtml(message.text || "·")}</span>` +
-        `<span class="msg-content__kind">${escapeHtml(kind)}</span>` +
         `</div>`;
     }
     const text = message.text;
     const textHtml = text
       ? `<div class="msg-content__text">${escapeHtml(text)}</div>`
       : `<div class="msg-content__text msg-content__text--empty">No text payload</div>`;
-    return `<div class="msg-content">` +
-      `<span class="msg-content__kind">${escapeHtml(kind)}</span>` +
-      textHtml +
-      `</div>`;
+    return `<div class="msg-content">` + textHtml + `</div>`;
   }
 
   function renderMessageDetail(message) {
@@ -499,9 +495,14 @@
     const decoded = message.decoded || {};
     const raw = message.raw || {};
 
-    const channelLabel = message.channel_index !== null && message.channel_index !== undefined
-      ? `Channel ${message.channel_index}`
-      : (message.channel_key ? `Key ${message.channel_key}` : null);
+    let channelLabel;
+    if (message.channel_index !== null && message.channel_index !== undefined) {
+      channelLabel = `Channel ${message.channel_index}`;
+    } else if (message.channel_key && message.channel_key !== "unknown") {
+      channelLabel = `Key ${message.channel_key}`;
+    } else {
+      channelLabel = "Unknown channel";
+    }
 
     const recipient = recipientParty(message);
     const routeHtml = `<div class="msg-route">` +
@@ -536,16 +537,12 @@
 
     const signal =
       row("RSSI", formatValueUnit(message.rx_rssi, "dBm")) +
-      row("SNR", formatValue(message.rx_snr));
+      row("SNR", formatValueUnit(message.rx_snr, "dB"));
 
-    const emojiFlag = message.emoji !== null && message.emoji !== undefined
-      ? formatValue(message.emoji) : null;
     const packet =
-      row("Message DB id", message.id) +
       row("Mesh packet id", message.packet_id) +
       row("Port", message.portnum || decoded.portnum) +
       row("Bitfield", formatValue(decoded.bitfield)) +
-      row("Emoji flag", emojiFlag) +
       row("Reply-to packet id", message.reply_id) +
       row("Payload (hex)", decoded.payload);
 
