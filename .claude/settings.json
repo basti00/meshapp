@@ -4,7 +4,19 @@
       "Bash(python -m py_compile main.py dump_messages.py)",
       "Bash(python -c ' *)",
       "Bash(node --check static/app.js)",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); print\\('main.py OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); print\\('main.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('main.py'\\).read\\(\\)\\); print\\('main.py OK'\\)\")",
+      "Bash(PORT=5057 timeout 18 uv run main.py)",
+      "Bash(curl -s -o /dev/null -w \"messages page: %{http_code}\\\\n\" http://127.0.0.1:5057/messages)",
+      "Bash(curl -s http://127.0.0.1:5057/messages)",
+      "Bash(wait)",
+      "Bash(PORT=5058 uv run main.py)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} -> %{redirect_url}\\\\n\" http://127.0.0.1:5058/messages)",
+      "Bash(curl -sL http://127.0.0.1:5058/messages)",
+      "Bash(curl -sL http://127.0.0.1:5058/messages -o /dev/null)",
+      "Bash(curl -s -o /dev/null -w \"%{redirect_url}\" http://127.0.0.1:5058/messages)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); m=d['messages']; print\\('count',len\\(m\\)\\); print\\('keys',sorted\\(m[0].keys\\(\\)\\) if m else 'none'\\); reps=[x for x in m if x.get\\('reply_id'\\) is not None]; print\\('replies',len\\(reps\\)\\); print\\('tapbacks',len\\([x for x in m if x.get\\('is_tapback'\\)]\\)\\)\")",
+      "Bash(kill %1)"
     ]
   }
 }

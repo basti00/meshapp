@@ -404,11 +404,45 @@ tbody tr:hover { background: var(--panel-hover); }
   background: var(--accent-soft);
 }
 
+/* ---------- Messages page layout ---------- */
+.messages-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 160px);
+  min-height: 360px;
+}
+
+.messages-page h1 { margin: 0 0 12px; }
+
+.messages-toolbar { flex: 0 0 auto; }
+
+.messages-toolbar__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.messages-toolbar__controls .channel-tabs { margin: 0; }
+
+.structure-control { flex: 0 0 auto; }
+
 /* ---------- Message bubbles ---------- */
 .message-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 6px 8px;
+}
+
+.message-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .bubble {
@@ -476,10 +510,44 @@ tbody tr:hover { background: var(--panel-hover); }
   white-space: nowrap;
 }
 
+.bubble__body--tapback {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.bubble__emoji {
+  font-family: var(--font-avatar);
+  font-size: 18px;
+}
+
 .empty-state {
   padding: 24px;
   text-align: center;
   color: var(--muted);
+}
+
+/* ---------- Treelike structure ---------- */
+.msg-tree,
+.msg-node,
+.msg-node__children {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Each reply depth indents and gains a connecting rail. */
+.msg-node__children {
+  margin-left: 16px;
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
+}
+
+.bubble--placeholder {
+  background: var(--panel-hover);
+  border-style: dashed;
+  box-shadow: none;
+  opacity: 0.75;
+  font-style: italic;
 }
 
 /* ---------- Modal ---------- */

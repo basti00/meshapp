@@ -1,60 +1,65 @@
 {% extends "base.html" %}
 {% block title %}Messages · Meshapp{% endblock %}
 {% block content %}
-<h1>Messages</h1>
-{% if channels %}
-  <div class="channel-tabs">
-    {% for channel in channels %}
-      {% set channel_label = "Channel " ~ (channel.channel_index if channel.channel_index is not none else (channel.channel_key or "?")) %}
-      <a href="{{ url_for('messages_channel', channel_key=channel.channel_key) }}"
-         class="{% if channel.channel_key == current_channel.channel_key %}active{% endif %}"
-         title="Key: {{ channel.channel_key }}">{{ channel_label }}</a>
-    {% endfor %}
+<div class="messages-page">
+  <div class="messages-toolbar">
+    <h1>Messages</h1>
+    <div class="messages-toolbar__controls">
+      {% if channels %}
+        <div class="channel-tabs">
+          {% for channel in channels %}
+            {% set channel_label = "Channel " ~ (channel.channel_index if channel.channel_index is not none else (channel.channel_key or "?")) %}
+            <a href="{{ url_for('messages_channel', channel_key=channel.channel_key) }}"
+               class="{% if channel.channel_key == current_channel.channel_key %}active{% endif %}"
+               title="Key: {{ channel.channel_key }}">{{ channel_label }}</a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div></div>
+      {% endif %}
+      <label class="sort-control structure-control">
+        <span>View</span>
+        <select id="structure-select">
+          <option value="linear">Linear structure</option>
+          <option value="tree">Treelike structure</option>
+        </select>
+      </label>
+    </div>
   </div>
-{% endif %}
-<div id="messages-list" class="message-list">
-  {% if messages %}
-    {% for msg in messages %}
-      {% set display_name = msg.long_name or msg.short_name or msg.from_id or "-" %}
-      {% set avatar_text_raw = msg.short_name or (msg.long_name[:2] if msg.long_name else (msg.from_id[:2] if msg.from_id else "?")) %}
-      {% set avatar_text = avatar_text_raw[:4] | upper %}
-      {% set avatar_small = avatar_text | length >= 4 %}
-      <article class="bubble bubble--clickable" data-message-id="{{ msg.id }}" tabindex="0" role="button" aria-label="View message details">
-        <header class="bubble__header">
-          <button type="button" class="node-button" data-node-id="{{ msg.from_id or '' }}">
-            <span class="avatar{% if avatar_small %} avatar--small{% endif %}"
-                  {% if msg.avatar_bg or msg.avatar_fg %}style="{% if msg.avatar_bg %}background: {{ msg.avatar_bg }};{% endif %}{% if msg.avatar_fg %} color: {{ msg.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
-            <span class="node-name">{{ display_name }}</span>
-          </button>
-        </header>
-        {% if msg.text %}
-          <div class="bubble__body">{{ msg.text }}</div>
-        {% else %}
-          <div class="bubble__body bubble__body--meta"><span class="tag">{{ msg.portnum or "unknown" }}</span></div>
-        {% endif %}
-        <footer class="bubble__footer">
-          <span class="bubble__meta">
-            {% if msg.hops is not none %}<span>{{ msg.hops }} {{ "hop" if msg.hops == 1 else "hops" }}</span>{% endif %}
-            {% if msg.rx_rssi is not none %}<span>{{ msg.rx_rssi | value }} dBm</span>{% endif %}
-            {% if msg.rx_snr is not none %}<span>SNR {{ msg.rx_snr | value }}</span>{% endif %}
-          </span>
-          <time class="bubble__time" datetime="{{ msg.rx_time }}">{{ msg.rx_time | message_time }}</time>
-        </footer>
-      </article>
-    {% endfor %}
-  {% else %}
-    <div class="empty-state">No messages yet.</div>
-  {% endif %}
+  <div id="messages-list" class="message-list" tabindex="0"></div>
 </div>
 {% endblock %}
 {% block scripts %}
+<script id="messages-data" type="application/json">{{ messages | tojson }}</script>
 <script>
   (function () {
     const refreshSeconds = {{ auto_refresh_seconds or 0 }};
     const channelKey = {{ current_channel.channel_key | tojson }};
+    const STRUCTURE_KEY = "meshapp.msgStructure";
     const list = document.getElementById("messages-list");
+    const select = document.getElementById("structure-select");
     const { formatMessageTime, formatValue, escapeHtml, renderNodeButton } = window.MeshApp;
 
+    let messages = [];
+    try {
+      messages = JSON.parse(document.getElementById("messages-data").textContent || "[]") || [];
+    } catch (e) {
+      messages = [];
+    }
+
+    function getStructure() {
+      try {
+        const v = localStorage.getItem(STRUCTURE_KEY);
+        if (v === "linear" || v === "tree") return v;
+      } catch (e) { /* ignore */ }
+      return "linear";
+    }
+
+    function setStructure(value) {
+      try { localStorage.setItem(STRUCTURE_KEY, value); } catch (e) { /* ignore */ }
+    }
+
+    // ---------- Shared rendering helpers ----------
     function renderMeta(msg) {
       const parts = [];
       if (msg.hops !== null && msg.hops !== undefined) {
@@ -70,7 +75,19 @@
       return parts.join("");
     }
 
-    function buildBubble(msg) {
+    function bubbleBody(msg) {
+      if (msg.is_tapback) {
+        return `<div class="bubble__body bubble__body--tapback">Reacted with ` +
+          `<span class="bubble__emoji">${escapeHtml(msg.text || "·")}</span></div>`;
+      }
+      return msg.text
+        ? `<div class="bubble__body">${escapeHtml(msg.text)}</div>`
+        : `<div class="bubble__body bubble__body--meta"><span class="tag">${escapeHtml(msg.portnum || "unknown")}</span></div>`;
+    }
+
+    // Builds the standard message bubble. `quoteHtml` (optional) is injected
+    // between the header and the body — used by the linear view.
+    function buildBubble(msg, quoteHtml) {
       const nodeBtn = renderNodeButton({
         node_id: msg.from_id,
         short_name: msg.short_name,
@@ -78,14 +95,12 @@
         avatar_bg: msg.avatar_bg,
         avatar_fg: msg.avatar_fg,
       });
-      const body = msg.text
-        ? `<div class="bubble__body">${escapeHtml(msg.text)}</div>`
-        : `<div class="bubble__body bubble__body--meta"><span class="tag">${escapeHtml(msg.portnum || "unknown")}</span></div>`;
       const messageId = msg.id !== null && msg.id !== undefined ? msg.id : "";
       return `
         <article class="bubble bubble--clickable" data-message-id="${escapeHtml(messageId)}" tabindex="0" role="button" aria-label="View message details">
           <header class="bubble__header">${nodeBtn}</header>
-          ${body}
+          ${quoteHtml || ""}
+          ${bubbleBody(msg)}
           <footer class="bubble__footer">
             <span class="bubble__meta">${renderMeta(msg)}</span>
             <time class="bubble__time" datetime="${escapeHtml(msg.rx_time || '')}">${escapeHtml(formatMessageTime(msg.rx_time))}</time>
@@ -93,23 +108,199 @@
         </article>`;
     }
 
+    // Maps mesh packet id -> message, so replies can find their parent.
+    function buildPacketIndex(msgs) {
+      const byPacket = new Map();
+      msgs.forEach(function (m) {
+        if (m.packet_id !== null && m.packet_id !== undefined && !byPacket.has(m.packet_id)) {
+          byPacket.set(m.packet_id, m);
+        }
+      });
+      return byPacket;
+    }
+
+    function parentPreview(parent) {
+      if (parent.is_tapback) return "Reacted with " + (parent.text || "·");
+      return parent.text || "(no text content)";
+    }
+
+    // ====================================================================
+    // LINEAR STRUCTURE
+    // Messenger-style: a reply carries a small quote of the message it
+    // answers, rendered inline above its own body.
+    // ====================================================================
+    const LinearView = {
+      quote: function (msg, byPacket) {
+        if (msg.reply_id === null || msg.reply_id === undefined) return "";
+        const parent = byPacket.get(msg.reply_id);
+        if (parent && parent.id !== msg.id) {
+          const name = parent.long_name || parent.short_name || parent.from_id || "Unknown node";
+          return `<button type="button" class="msg-quote" title="View original message" ` +
+            `data-message-id="${escapeHtml(String(parent.id))}">` +
+            `<span class="msg-quote__bar" aria-hidden="true"></span>` +
+            `<span class="msg-quote__main">` +
+            `<span class="msg-quote__label">In reply to ${escapeHtml(name)}</span>` +
+            `<span class="msg-quote__text">${escapeHtml(parentPreview(parent))}</span>` +
+            `</span>` +
+            `<span class="msg-quote__go" aria-hidden="true">↗</span>` +
+            `</button>`;
+        }
+        return `<div class="msg-quote msg-quote--missing">` +
+          `<span class="msg-quote__bar" aria-hidden="true"></span>` +
+          `<span class="msg-quote__main">` +
+          `<span class="msg-quote__label">In reply to packet #${escapeHtml(String(msg.reply_id))}</span>` +
+          `<span class="msg-quote__text">Original message not in stored history</span>` +
+          `</span>` +
+          `</div>`;
+      },
+      render: function (msgs) {
+        const byPacket = buildPacketIndex(msgs);
+        const ordered = msgs.slice().sort(function (a, b) {
+          return (a.rx_time - b.rx_time) || (a.id - b.id);
+        });
+        const self = this;
+        return ordered.map(function (m) {
+          return buildBubble(m, self.quote(m, byPacket));
+        }).join("");
+      },
+    };
+
+    // ====================================================================
+    // TREELIKE STRUCTURE
+    // Reddit-style threads: replies nest under their parent, indented per
+    // depth. Replies to a message that isn't in stored history collect
+    // under a greyed-out placeholder. Trees (and sibling subtrees) are
+    // ordered by their most recent leaf, so a fresh reply pulls an old
+    // thread to the bottom.
+    // ====================================================================
+    const TreeView = {
+      placeholderBubble: function (node) {
+        return `<article class="bubble bubble--placeholder">` +
+          `<div class="bubble__body bubble__body--meta">` +
+          `Original message not in stored history ` +
+          `<span class="muted">(packet #${escapeHtml(String(node.reply_id))})</span>` +
+          `</div></article>`;
+      },
+      // Subtree recency = newest rx_time among the node and its descendants.
+      // The _visiting flag keeps pathological reply cycles from looping.
+      recency: function (node) {
+        if (node._rec !== undefined) return node._rec;
+        const own = node.placeholder ? 0 : (Number(node.msg.rx_time) || 0);
+        if (node._visiting) return own;
+        node._visiting = true;
+        let r = own;
+        const self = this;
+        node.children.forEach(function (c) { r = Math.max(r, self.recency(c)); });
+        node._visiting = false;
+        node._rec = r;
+        return r;
+      },
+      sortNodes: function (arr) {
+        const self = this;
+        return arr.slice().sort(function (a, b) {
+          const diff = self.recency(a) - self.recency(b);
+          if (diff) return diff;
+          return String(a.id).localeCompare(String(b.id));
+        });
+      },
+      renderNode: function (node, rendered) {
+        if (rendered.has(node)) return "";
+        rendered.add(node);
+        const inner = node.placeholder ? this.placeholderBubble(node) : buildBubble(node.msg);
+        const self = this;
+        const kids = this.sortNodes(node.children).map(function (c) {
+          return self.renderNode(c, rendered);
+        }).join("");
+        const childrenHtml = kids ? `<div class="msg-node__children">${kids}</div>` : "";
+        return `<div class="msg-node">${inner}${childrenHtml}</div>`;
+      },
+      render: function (msgs) {
+        const byPacket = buildPacketIndex(msgs);
+        const nodes = new Map();
+        msgs.forEach(function (m) {
+          nodes.set(m.id, { id: m.id, msg: m, children: [] });
+        });
+
+        const roots = [];
+        const placeholders = new Map();
+        msgs.forEach(function (m) {
+          const node = nodes.get(m.id);
+          const rid = m.reply_id;
+          if (rid === null || rid === undefined) {
+            roots.push(node);
+            return;
+          }
+          const parent = byPacket.get(rid);
+          if (parent && parent.id !== m.id && nodes.has(parent.id)) {
+            nodes.get(parent.id).children.push(node);
+            node.attached = true;
+          } else {
+            let ph = placeholders.get(rid);
+            if (!ph) {
+              ph = { id: "ph-" + rid, placeholder: true, reply_id: rid, children: [] };
+              placeholders.set(rid, ph);
+              roots.push(ph);
+            }
+            ph.children.push(node);
+            node.attached = true;
+          }
+        });
+        // Rescue any node orphaned by a reply cycle so it still renders.
+        nodes.forEach(function (node) {
+          if (!node.attached && roots.indexOf(node) === -1) roots.push(node);
+        });
+
+        const rendered = new Set();
+        const self = this;
+        const html = this.sortNodes(roots).map(function (r) {
+          return self.renderNode(r, rendered);
+        }).join("");
+        return `<div class="msg-tree">${html}</div>`;
+      },
+    };
+
+    // ---------- Render + scroll ----------
+    function render() {
+      if (!messages.length) {
+        list.innerHTML = '<div class="empty-state">No messages yet.</div>';
+        return;
+      }
+      list.innerHTML = getStructure() === "tree"
+        ? TreeView.render(messages)
+        : LinearView.render(messages);
+    }
+
+    function isNearBottom() {
+      return list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+    }
+
+    function renderAndScroll(forceBottom) {
+      const stick = forceBottom || isNearBottom();
+      render();
+      if (stick) list.scrollTop = list.scrollHeight;
+    }
+
     async function refresh() {
-      if (!list || channelKey === null || channelKey === undefined) return;
+      if (channelKey === null || channelKey === undefined) return;
       try {
         const response = await fetch(`/api/messages/${encodeURIComponent(channelKey)}`, { cache: "no-store" });
         if (!response.ok) return;
         const payload = await response.json();
-        const messages = payload.messages || [];
-        list.innerHTML = messages.length
-          ? messages.map(buildBubble).join("")
-          : '<div class="empty-state">No messages yet.</div>';
+        messages = payload.messages || [];
+        renderAndScroll(false);
       } catch (e) {
         console.warn("Failed to refresh messages", e);
       }
     }
 
+    select.value = getStructure();
+    select.addEventListener("change", function () {
+      setStructure(select.value);
+      renderAndScroll(true);
+    });
+
+    renderAndScroll(true);
     if (refreshSeconds > 0) setInterval(refresh, refreshSeconds * 1000);
-    refresh();
   })();
 </script>
 {% endblock %}

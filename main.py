@@ -788,11 +788,21 @@ def _find_channel_info(channels, channel_key):
     return {"channel_key": channel_key, "channel_index": None}
 
 
-def _render_messages(channel_key, channels):
+def _load_channel_messages(channel_key):
+    """Fetch a channel's messages enriched with reply linkage.
+
+    Each row carries ``packet_id`` (the mesh packet id, used as the reply
+    target) and ``reply_id`` (the packet id this message replies to, or None).
+    Together they let the client wire up linear quotes / threaded trees
+    without extra round-trips. Tapbacks are flagged via ``is_tapback``.
+    """
     with _db_connect() as conn:
         rows = conn.execute(
             """
-            SELECT m.*, n.short_name, n.long_name
+            SELECT m.id, m.rx_time, m.channel_index, m.channel_key,
+                   m.from_id, m.to_id, m.hops, m.portnum, m.text,
+                   m.rx_rssi, m.rx_snr, m.packet_id, m.decoded_json, m.raw_json,
+                   n.short_name, n.long_name
             FROM messages m
             LEFT JOIN nodes n ON n.node_id = m.from_id
             WHERE m.channel_key = ?
@@ -801,9 +811,28 @@ def _render_messages(channel_key, channels):
             """,
             (channel_key,),
         ).fetchall()
-    messages_list = [dict(row) for row in rows]
-    for message in messages_list:
+    messages_list = []
+    for row in rows:
+        message = dict(row)
+        decoded = _safe_json_loads(message.pop("decoded_json", None))
+        raw = _safe_json_loads(message.pop("raw_json", None))
+        reply_id = None
+        emoji = None
+        if isinstance(decoded, dict):
+            reply_id = decoded.get("replyId") or decoded.get("reply_id")
+            emoji = decoded.get("emoji")
+        # Older rows predate the packet_id column; fall back to raw_json.
+        if message.get("packet_id") is None and isinstance(raw, dict):
+            message["packet_id"] = _coerce_int(raw.get("id"))
+        message["reply_id"] = _coerce_int(reply_id)
+        message["is_tapback"] = bool(emoji)
         message.update(_node_avatar_colors(message.get("from_id")))
+        messages_list.append(message)
+    return messages_list
+
+
+def _render_messages(channel_key, channels):
+    messages_list = _load_channel_messages(channel_key)
     current_channel = _find_channel_info(channels, channel_key)
     return render_template(
         "messages.html",
@@ -816,35 +845,7 @@ def _render_messages(channel_key, channels):
 
 @app.route("/api/messages/<channel_key>")
 def messages_api(channel_key):
-    with _db_connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                m.id,
-                m.rx_time,
-                m.channel_index,
-                m.channel_key,
-                m.from_id,
-                m.to_id,
-                m.hops,
-                m.portnum,
-                m.text,
-                m.rx_rssi,
-                m.rx_snr,
-                n.short_name,
-                n.long_name
-            FROM messages m
-            LEFT JOIN nodes n ON n.node_id = m.from_id
-            WHERE m.channel_key = ?
-            ORDER BY m.rx_time DESC
-            LIMIT 500
-            """,
-            (channel_key,),
-        ).fetchall()
-    messages_list = [dict(row) for row in rows]
-    for message in messages_list:
-        message.update(_node_avatar_colors(message.get("from_id")))
-    return jsonify({"messages": messages_list})
+    return jsonify({"messages": _load_channel_messages(channel_key)})
 
 
 @app.route("/messages")
