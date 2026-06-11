@@ -3,20 +3,8 @@
 {% block content %}
 <div class="messages-page">
   <div class="messages-toolbar">
-    <h1>Messages</h1>
-    <div class="messages-toolbar__controls">
-      {% if channels %}
-        <div class="channel-tabs">
-          {% for channel in channels %}
-            {% set channel_label = "Channel " ~ (channel.channel_index if channel.channel_index is not none else (channel.channel_key or "?")) %}
-            <a href="{{ url_for('messages_channel', channel_key=channel.channel_key) }}"
-               class="{% if channel.channel_key == current_channel.channel_key %}active{% endif %}"
-               title="Key: {{ channel.channel_key }}">{{ channel_label }}</a>
-          {% endfor %}
-        </div>
-      {% else %}
-        <div></div>
-      {% endif %}
+    <div class="messages-toolbar__top">
+      <h1>Messages</h1>
       <label class="sort-control structure-control">
         <span>View</span>
         <select id="structure-select">
@@ -25,6 +13,16 @@
         </select>
       </label>
     </div>
+    {% if channels %}
+      <div class="channel-tabs">
+        {% for channel in channels %}
+          {% set channel_label = "Channel " ~ (channel.channel_index if channel.channel_index is not none else (channel.channel_key or "?")) %}
+          <a href="{{ url_for('messages_channel', channel_key=channel.channel_key) }}"
+             class="{% if channel.channel_key == current_channel.channel_key %}active{% endif %}"
+             title="Key: {{ channel.channel_key }}">{{ channel_label }}</a>
+        {% endfor %}
+      </div>
+    {% endif %}
   </div>
   <div id="messages-list" class="message-list" tabindex="0"></div>
 </div>

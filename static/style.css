@@ -405,27 +405,47 @@ tbody tr:hover { background: var(--panel-hover); }
 }
 
 /* ---------- Messages page layout ---------- */
+/* On the messages route, lock the viewport so the message list is the only
+   scroller (no double scrollbar) and fills the page vertically. */
+html:has(.messages-page) { scrollbar-gutter: auto; }
+
+body:has(.messages-page) {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+body:has(.messages-page) main {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 auto;
+  padding-top: clamp(12px, 3vw, 18px);
+  padding-bottom: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .messages-page {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - 160px);
-  min-height: 360px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
-
-.messages-page h1 { margin: 0 0 12px; }
 
 .messages-toolbar { flex: 0 0 auto; }
 
-.messages-toolbar__controls {
+.messages-toolbar__top {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
-.messages-toolbar__controls .channel-tabs { margin: 0; }
+.messages-toolbar__top h1 { margin: 0; }
+
+.messages-toolbar .channel-tabs { margin: 0 0 10px; }
 
 .structure-control { flex: 0 0 auto; }
 
@@ -890,6 +910,22 @@ button.msg-quote:hover .msg-quote__go { color: var(--accent); }
   tbody td { padding: 8px 6px; }
   .site-header { padding: 12px 14px; }
   .site-header .title { font-size: 18px; }
+
+  /* Scale message bubbles and text ~10% smaller to fit more on screen. */
+  .messages-page h1 { font-size: clamp(17px, 5vw, 20px); }
+  .message-list { gap: 8px; padding: 4px 4px 6px; }
+  .bubble { padding: 10px 12px; gap: 7px; border-radius: 12px; }
+  .bubble__body { font-size: 13.5px; }
+  .bubble__body--meta { font-size: 12px; }
+  .bubble__footer { font-size: 11px; }
+  .bubble__body--tapback { font-size: 12.5px; }
+  .bubble__emoji { font-size: 16px; }
+  .bubble .avatar { width: 28px; height: 28px; font-size: 12px; }
+  .bubble .avatar--small { font-size: 9px; }
+  .bubble .node-button__sub { font-size: 10px; }
+  .msg-quote__text { font-size: 12px; }
+  .msg-quote__label { font-size: 10px; }
+  .msg-node__children { margin-left: 12px; padding-left: 12px; }
 }
 
 @media (max-width: 560px) {
