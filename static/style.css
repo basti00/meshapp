@@ -541,6 +541,55 @@ body:has(.messages-page) main {
   font-size: 18px;
 }
 
+/* ---------- Tapback capsules ---------- */
+/* Reactions render as small capsules under the message they react to. They
+   wrap onto a new row once they overflow the available width. The negative
+   top margin snugs the row up against its parent bubble despite the list gap. */
+.tapback-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: -4px;
+  padding-left: 16px;
+}
+
+.tapback {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 3px 1px 1px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  line-height: 1;
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.tapback:hover {
+  border-color: var(--accent);
+  background: var(--panel-hover);
+  box-shadow: var(--shadow-strong);
+}
+
+.tapback:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tapback .avatar.tapback__avatar {
+  width: 25px;
+  height: 25px;
+  font-size: 9px;
+}
+
+.tapback__emoji {
+  font-family: var(--font-avatar);
+  font-size: 18px;
+}
+
 .empty-state {
   padding: 24px;
   text-align: center;

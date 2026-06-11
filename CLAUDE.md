@@ -1,6 +1,6 @@
 # Notes for this project
 
-* App run command is `uv run main.py` from `~/meshapp` (won't work locally due to missing serial device)
+* App run command is `uv run main.py` from `~/meshapp` (will throw execptions locally due to missing serial device, but database is available for testing).
 * A copy of the prod-database is at `meshapp.db` for reference. It may be out of date.
 * In files dump_nodes and dump_messages some diagnostic print statements are available to help understand the data. 
 * When exiting, suggest a commit message for the changes you made, 10 - 20 words max. 

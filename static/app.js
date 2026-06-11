@@ -153,6 +153,18 @@
       `</span>`;
   }
 
+  // Renders just the avatar span (no surrounding button), reusing the same
+  // initials + colour logic as renderNodeButton. `extraClass` lets callers
+  // tweak the shape (e.g. the rounded-square avatar inside a tapback capsule).
+  function renderAvatar(opts) {
+    // opts: { short_name, long_name, node_id, avatar_bg, avatar_fg, extraClass? }
+    const avatarText = avatarTextFor(opts.short_name, opts.long_name, opts.node_id);
+    const sizeCls = avatarLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
+    const cls = opts.extraClass ? `${sizeCls} ${opts.extraClass}` : sizeCls;
+    const style = buildAvatarStyle(opts.avatar_bg, opts.avatar_fg);
+    return `<span class="${cls}"${style}>${escapeHtml(avatarText)}</span>`;
+  }
+
   function renderNodeButton(opts) {
     // opts: { node_id, short_name, long_name, avatar_bg, avatar_fg,
     //         last_seen?, subtitle?, show_status?, battery_level? }
@@ -602,6 +614,12 @@
         showMessageModal(quote.dataset.messageId);
         return;
       }
+      const tapback = event.target.closest(".tapback[data-message-id]");
+      if (tapback) {
+        event.preventDefault();
+        showMessageModal(tapback.dataset.messageId);
+        return;
+      }
       const bubble = event.target.closest(".bubble[data-message-id]");
       if (bubble) {
         event.preventDefault();
@@ -630,6 +648,7 @@
     formatValueUnit,
     escapeHtml,
     renderNodeButton,
+    renderAvatar,
     renderBattery,
     batteryInfo,
     showNodeModal,

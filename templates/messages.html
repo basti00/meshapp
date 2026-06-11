@@ -36,7 +36,7 @@
     const STRUCTURE_KEY = "meshapp.msgStructure";
     const list = document.getElementById("messages-list");
     const select = document.getElementById("structure-select");
-    const { formatMessageTime, formatValue, escapeHtml, renderNodeButton } = window.MeshApp;
+    const { formatMessageTime, formatValue, escapeHtml, renderNodeButton, renderAvatar } = window.MeshApp;
 
     let messages = [];
     try {
@@ -122,6 +122,55 @@
       return parent.text || "(no text content)";
     }
 
+    // ---------- Tapback capsules ----------
+    // A tapback is rendered as a small capsule (sender avatar + emoji) shown
+    // beneath the message it reacts to. Clicking it opens the message info.
+    function renderTapback(msg) {
+      const messageId = msg.id !== null && msg.id !== undefined ? msg.id : "";
+      const name = msg.long_name || msg.short_name || msg.from_id || "Unknown node";
+      const avatar = renderAvatar({
+        short_name: msg.short_name,
+        long_name: msg.long_name,
+        node_id: msg.from_id,
+        avatar_bg: msg.avatar_bg,
+        avatar_fg: msg.avatar_fg,
+        extraClass: "tapback__avatar",
+      });
+      return `<button type="button" class="tapback" data-message-id="${escapeHtml(String(messageId))}" ` +
+        `title="Reaction from ${escapeHtml(name)}">` +
+        avatar +
+        `<span class="tapback__emoji">${escapeHtml(msg.text || "·")}</span>` +
+        `</button>`;
+    }
+
+    function renderTapbackRow(tapbacks) {
+      if (!tapbacks || !tapbacks.length) return "";
+      const ordered = tapbacks.slice().sort(function (a, b) {
+        return (a.rx_time - b.rx_time) || (a.id - b.id);
+      });
+      return `<div class="tapback-row">${ordered.map(renderTapback).join("")}</div>`;
+    }
+
+    // Groups tapbacks under the message they react to (matched via reply_id ->
+    // parent packet_id). Returns the per-parent map plus the set of tapback ids
+    // that found a parent, so callers can skip rendering them as standalone
+    // bubbles. Orphan tapbacks (parent not in history) fall through unchanged.
+    function buildTapbackIndex(msgs, byPacket) {
+      const byParent = new Map();
+      const handled = new Set();
+      msgs.forEach(function (m) {
+        if (!m.is_tapback) return;
+        if (m.reply_id === null || m.reply_id === undefined) return;
+        const parent = byPacket.get(m.reply_id);
+        if (parent && parent.id !== m.id) {
+          if (!byParent.has(parent.id)) byParent.set(parent.id, []);
+          byParent.get(parent.id).push(m);
+          handled.add(m.id);
+        }
+      });
+      return { byParent: byParent, handled: handled };
+    }
+
     // ====================================================================
     // LINEAR STRUCTURE
     // Messenger-style: a reply carries a small quote of the message it
@@ -153,12 +202,15 @@
       },
       render: function (msgs) {
         const byPacket = buildPacketIndex(msgs);
+        const tb = buildTapbackIndex(msgs, byPacket);
         const ordered = msgs.slice().sort(function (a, b) {
           return (a.rx_time - b.rx_time) || (a.id - b.id);
         });
         const self = this;
         return ordered.map(function (m) {
-          return buildBubble(m, self.quote(m, byPacket));
+          // Tapbacks attached to a parent render as capsules under it, not here.
+          if (m.is_tapback && tb.handled.has(m.id)) return "";
+          return buildBubble(m, self.quote(m, byPacket)) + renderTapbackRow(tb.byParent.get(m.id));
         }).join("");
       },
     };
@@ -189,6 +241,7 @@
         let r = own;
         const self = this;
         node.children.forEach(function (c) { r = Math.max(r, self.recency(c)); });
+        (node.tapbacks || []).forEach(function (t) { r = Math.max(r, Number(t.rx_time) || 0); });
         node._visiting = false;
         node._rec = r;
         return r;
@@ -205,18 +258,19 @@
         if (rendered.has(node)) return "";
         rendered.add(node);
         const inner = node.placeholder ? this.placeholderBubble(node) : buildBubble(node.msg);
+        const tapbacksHtml = renderTapbackRow(node.tapbacks);
         const self = this;
         const kids = this.sortNodes(node.children).map(function (c) {
           return self.renderNode(c, rendered);
         }).join("");
         const childrenHtml = kids ? `<div class="msg-node__children">${kids}</div>` : "";
-        return `<div class="msg-node">${inner}${childrenHtml}</div>`;
+        return `<div class="msg-node">${inner}${tapbacksHtml}${childrenHtml}</div>`;
       },
       render: function (msgs) {
         const byPacket = buildPacketIndex(msgs);
         const nodes = new Map();
         msgs.forEach(function (m) {
-          nodes.set(m.id, { id: m.id, msg: m, children: [] });
+          nodes.set(m.id, { id: m.id, msg: m, children: [], tapbacks: [] });
         });
 
         const roots = [];
@@ -230,7 +284,12 @@
           }
           const parent = byPacket.get(rid);
           if (parent && parent.id !== m.id && nodes.has(parent.id)) {
-            nodes.get(parent.id).children.push(node);
+            // Tapbacks render as capsules on their parent, not as nested bubbles.
+            if (m.is_tapback) {
+              nodes.get(parent.id).tapbacks.push(m);
+            } else {
+              nodes.get(parent.id).children.push(node);
+            }
             node.attached = true;
           } else {
             let ph = placeholders.get(rid);
