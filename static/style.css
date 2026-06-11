@@ -590,6 +590,18 @@ body:has(.messages-page) main {
   font-size: 18px;
 }
 
+/* Reactions to a message that isn't in stored history: a greyed placeholder
+   with the capsules grouped beneath it. */
+.tapback-orphan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tapback-orphan .tapback-row {
+  margin-top: 0;
+}
+
 .empty-state {
   padding: 24px;
   text-align: center;

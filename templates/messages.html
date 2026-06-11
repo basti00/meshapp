@@ -151,12 +151,31 @@
       return `<div class="tapback-row">${ordered.map(renderTapback).join("")}</div>`;
     }
 
+    // Greyed-out placeholder shown above tapbacks whose reacted-to message is
+    // not in stored history, so the capsules still have context.
+    function renderMissingParent(replyId) {
+      return `<div class="msg-quote msg-quote--missing">` +
+        `<span class="msg-quote__bar" aria-hidden="true"></span>` +
+        `<span class="msg-quote__main">` +
+        `<span class="msg-quote__label">In reply to packet #${escapeHtml(String(replyId))}</span>` +
+        `<span class="msg-quote__text">Original message not in stored history</span>` +
+        `</span></div>`;
+    }
+
+    function renderOrphanTapbacks(replyId, tapbacks) {
+      return `<div class="tapback-orphan">` +
+        renderMissingParent(replyId) +
+        renderTapbackRow(tapbacks) +
+        `</div>`;
+    }
+
     // Groups tapbacks under the message they react to (matched via reply_id ->
-    // parent packet_id). Returns the per-parent map plus the set of tapback ids
-    // that found a parent, so callers can skip rendering them as standalone
-    // bubbles. Orphan tapbacks (parent not in history) fall through unchanged.
+    // parent packet_id). Tapbacks whose parent isn't in history are grouped by
+    // the missing packet id under `orphans`. `handled` collects every tapback
+    // id that becomes a capsule, so callers skip rendering it as a bubble.
     function buildTapbackIndex(msgs, byPacket) {
       const byParent = new Map();
+      const orphans = new Map();
       const handled = new Set();
       msgs.forEach(function (m) {
         if (!m.is_tapback) return;
@@ -165,10 +184,13 @@
         if (parent && parent.id !== m.id) {
           if (!byParent.has(parent.id)) byParent.set(parent.id, []);
           byParent.get(parent.id).push(m);
-          handled.add(m.id);
+        } else {
+          if (!orphans.has(m.reply_id)) orphans.set(m.reply_id, []);
+          orphans.get(m.reply_id).push(m);
         }
+        handled.add(m.id);
       });
-      return { byParent: byParent, handled: handled };
+      return { byParent: byParent, orphans: orphans, handled: handled };
     }
 
     // ====================================================================
@@ -207,9 +229,19 @@
           return (a.rx_time - b.rx_time) || (a.id - b.id);
         });
         const self = this;
+        const orphanDone = new Set();
         return ordered.map(function (m) {
-          // Tapbacks attached to a parent render as capsules under it, not here.
-          if (m.is_tapback && tb.handled.has(m.id)) return "";
+          // Tapbacks render as capsules, not standalone bubbles.
+          if (m.is_tapback && tb.handled.has(m.id)) {
+            // Orphan tapback: render its grouped placeholder once, at the
+            // chronological position of its earliest reaction.
+            if (tb.orphans.has(m.reply_id)) {
+              if (orphanDone.has(m.reply_id)) return "";
+              orphanDone.add(m.reply_id);
+              return renderOrphanTapbacks(m.reply_id, tb.orphans.get(m.reply_id));
+            }
+            return "";
+          }
           return buildBubble(m, self.quote(m, byPacket)) + renderTapbackRow(tb.byParent.get(m.id));
         }).join("");
       },
@@ -294,11 +326,17 @@
           } else {
             let ph = placeholders.get(rid);
             if (!ph) {
-              ph = { id: "ph-" + rid, placeholder: true, reply_id: rid, children: [] };
+              ph = { id: "ph-" + rid, placeholder: true, reply_id: rid, children: [], tapbacks: [] };
               placeholders.set(rid, ph);
               roots.push(ph);
             }
-            ph.children.push(node);
+            // Reactions to the missing message become capsules on the
+            // placeholder; real replies stay nested beneath it.
+            if (m.is_tapback) {
+              ph.tapbacks.push(m);
+            } else {
+              ph.children.push(node);
+            }
             node.attached = true;
           }
         });
