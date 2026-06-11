@@ -5,13 +5,6 @@
   <div class="messages-toolbar">
     <div class="messages-toolbar__top">
       <h1>Messages</h1>
-      <label class="sort-control structure-control">
-        <span>View</span>
-        <select id="structure-select">
-          <option value="linear">Linear structure</option>
-          <option value="tree">Treelike structure</option>
-        </select>
-      </label>
     </div>
     {% if channels %}
       <div class="channel-tabs">
@@ -33,9 +26,7 @@
   (function () {
     const refreshSeconds = {{ auto_refresh_seconds or 0 }};
     const channelKey = {{ current_channel.channel_key | tojson }};
-    const STRUCTURE_KEY = "meshapp.msgStructure";
     const list = document.getElementById("messages-list");
-    const select = document.getElementById("structure-select");
     const { formatMessageTime, formatValue, escapeHtml, renderNodeButton, renderAvatar } = window.MeshApp;
 
     let messages = [];
@@ -43,18 +34,6 @@
       messages = JSON.parse(document.getElementById("messages-data").textContent || "[]") || [];
     } catch (e) {
       messages = [];
-    }
-
-    function getStructure() {
-      try {
-        const v = localStorage.getItem(STRUCTURE_KEY);
-        if (v === "linear" || v === "tree") return v;
-      } catch (e) { /* ignore */ }
-      return "linear";
-    }
-
-    function setStructure(value) {
-      try { localStorage.setItem(STRUCTURE_KEY, value); } catch (e) { /* ignore */ }
     }
 
     // ---------- Shared rendering helpers ----------
@@ -83,9 +62,8 @@
         : `<div class="bubble__body bubble__body--meta"><span class="tag">${escapeHtml(msg.portnum || "unknown")}</span></div>`;
     }
 
-    // Builds the standard message bubble. `quoteHtml` (optional) is injected
-    // between the header and the body — used by the linear view.
-    function buildBubble(msg, quoteHtml) {
+    // Builds the standard message bubble.
+    function buildBubble(msg) {
       const nodeBtn = renderNodeButton({
         node_id: msg.from_id,
         short_name: msg.short_name,
@@ -97,7 +75,6 @@
       return `
         <article class="bubble bubble--clickable" data-message-id="${escapeHtml(messageId)}" tabindex="0" role="button" aria-label="View message details">
           <header class="bubble__header">${nodeBtn}</header>
-          ${quoteHtml || ""}
           ${bubbleBody(msg)}
           <footer class="bubble__footer">
             <span class="bubble__meta">${renderMeta(msg)}</span>
@@ -115,11 +92,6 @@
         }
       });
       return byPacket;
-    }
-
-    function parentPreview(parent) {
-      if (parent.is_tapback) return "Reacted with " + (parent.text || "·");
-      return parent.text || "(no text content)";
     }
 
     // ---------- Tapback capsules ----------
@@ -150,102 +122,6 @@
       });
       return `<div class="tapback-row">${ordered.map(renderTapback).join("")}</div>`;
     }
-
-    // Greyed-out placeholder shown above tapbacks whose reacted-to message is
-    // not in stored history, so the capsules still have context.
-    function renderMissingParent(replyId) {
-      return `<div class="msg-quote msg-quote--missing">` +
-        `<span class="msg-quote__bar" aria-hidden="true"></span>` +
-        `<span class="msg-quote__main">` +
-        `<span class="msg-quote__label">In reply to packet #${escapeHtml(String(replyId))}</span>` +
-        `<span class="msg-quote__text">Original message not in stored history</span>` +
-        `</span></div>`;
-    }
-
-    function renderOrphanTapbacks(replyId, tapbacks) {
-      return `<div class="tapback-orphan">` +
-        renderMissingParent(replyId) +
-        renderTapbackRow(tapbacks) +
-        `</div>`;
-    }
-
-    // Groups tapbacks under the message they react to (matched via reply_id ->
-    // parent packet_id). Tapbacks whose parent isn't in history are grouped by
-    // the missing packet id under `orphans`. `handled` collects every tapback
-    // id that becomes a capsule, so callers skip rendering it as a bubble.
-    function buildTapbackIndex(msgs, byPacket) {
-      const byParent = new Map();
-      const orphans = new Map();
-      const handled = new Set();
-      msgs.forEach(function (m) {
-        if (!m.is_tapback) return;
-        if (m.reply_id === null || m.reply_id === undefined) return;
-        const parent = byPacket.get(m.reply_id);
-        if (parent && parent.id !== m.id) {
-          if (!byParent.has(parent.id)) byParent.set(parent.id, []);
-          byParent.get(parent.id).push(m);
-        } else {
-          if (!orphans.has(m.reply_id)) orphans.set(m.reply_id, []);
-          orphans.get(m.reply_id).push(m);
-        }
-        handled.add(m.id);
-      });
-      return { byParent: byParent, orphans: orphans, handled: handled };
-    }
-
-    // ====================================================================
-    // LINEAR STRUCTURE
-    // Messenger-style: a reply carries a small quote of the message it
-    // answers, rendered inline above its own body.
-    // ====================================================================
-    const LinearView = {
-      quote: function (msg, byPacket) {
-        if (msg.reply_id === null || msg.reply_id === undefined) return "";
-        const parent = byPacket.get(msg.reply_id);
-        if (parent && parent.id !== msg.id) {
-          const name = parent.long_name || parent.short_name || parent.from_id || "Unknown node";
-          return `<button type="button" class="msg-quote" title="View original message" ` +
-            `data-message-id="${escapeHtml(String(parent.id))}">` +
-            `<span class="msg-quote__bar" aria-hidden="true"></span>` +
-            `<span class="msg-quote__main">` +
-            `<span class="msg-quote__label">In reply to ${escapeHtml(name)}</span>` +
-            `<span class="msg-quote__text">${escapeHtml(parentPreview(parent))}</span>` +
-            `</span>` +
-            `<span class="msg-quote__go" aria-hidden="true">↗</span>` +
-            `</button>`;
-        }
-        return `<div class="msg-quote msg-quote--missing">` +
-          `<span class="msg-quote__bar" aria-hidden="true"></span>` +
-          `<span class="msg-quote__main">` +
-          `<span class="msg-quote__label">In reply to packet #${escapeHtml(String(msg.reply_id))}</span>` +
-          `<span class="msg-quote__text">Original message not in stored history</span>` +
-          `</span>` +
-          `</div>`;
-      },
-      render: function (msgs) {
-        const byPacket = buildPacketIndex(msgs);
-        const tb = buildTapbackIndex(msgs, byPacket);
-        const ordered = msgs.slice().sort(function (a, b) {
-          return (a.rx_time - b.rx_time) || (a.id - b.id);
-        });
-        const self = this;
-        const orphanDone = new Set();
-        return ordered.map(function (m) {
-          // Tapbacks render as capsules, not standalone bubbles.
-          if (m.is_tapback && tb.handled.has(m.id)) {
-            // Orphan tapback: render its grouped placeholder once, at the
-            // chronological position of its earliest reaction.
-            if (tb.orphans.has(m.reply_id)) {
-              if (orphanDone.has(m.reply_id)) return "";
-              orphanDone.add(m.reply_id);
-              return renderOrphanTapbacks(m.reply_id, tb.orphans.get(m.reply_id));
-            }
-            return "";
-          }
-          return buildBubble(m, self.quote(m, byPacket)) + renderTapbackRow(tb.byParent.get(m.id));
-        }).join("");
-      },
-    };
 
     // ====================================================================
     // TREELIKE STRUCTURE
@@ -360,9 +236,7 @@
         list.innerHTML = '<div class="empty-state">No messages yet.</div>';
         return;
       }
-      list.innerHTML = getStructure() === "tree"
-        ? TreeView.render(messages)
-        : LinearView.render(messages);
+      list.innerHTML = TreeView.render(messages);
     }
 
     function isNearBottom() {
@@ -387,12 +261,6 @@
         console.warn("Failed to refresh messages", e);
       }
     }
-
-    select.value = getStructure();
-    select.addEventListener("change", function () {
-      setStructure(select.value);
-      renderAndScroll(true);
-    });
 
     renderAndScroll(true);
     if (refreshSeconds > 0) setInterval(refresh, refreshSeconds * 1000);

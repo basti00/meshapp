@@ -793,8 +793,8 @@ def _load_channel_messages(channel_key):
 
     Each row carries ``packet_id`` (the mesh packet id, used as the reply
     target) and ``reply_id`` (the packet id this message replies to, or None).
-    Together they let the client wire up linear quotes / threaded trees
-    without extra round-trips. Tapbacks are flagged via ``is_tapback``.
+    Together they let the client wire up threaded trees without extra
+    round-trips. Tapbacks are flagged via ``is_tapback``.
     """
     with _db_connect() as conn:
         rows = conn.execute(
