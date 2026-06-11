@@ -246,20 +246,78 @@
 
         const rendered = new Set();
         const self = this;
-        const html = this.sortNodes(roots).map(function (r) {
-          return self.renderNode(r, rendered);
-        }).join("");
-        return `<div class="msg-tree">${html}</div>`;
+        // Return one segment per top-level tree, each with a stable key (the
+        // root node's id), so the DOM can be reconciled tree-by-tree instead
+        // of rebuilt wholesale -- see reconcileTrees().
+        return this.sortNodes(roots).map(function (r) {
+          return { key: String(r.id), html: self.renderNode(r, rendered) };
+        });
       },
     };
 
     // ---------- Render + scroll ----------
+    // Persistent container + per-tree DOM cache. Reconciling against this
+    // (rather than replacing innerHTML) keeps unchanged bubbles' nodes alive,
+    // which avoids the full-list repaint flash iOS Safari shows otherwise.
+    let treeEl = null;
+    const treeNodes = new Map(); // key -> { el, html }
+
+    function elementFromHtml(html) {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = html;
+      return tmp.firstElementChild;
+    }
+
+    // Patch the DOM to match `trees` (ordered [{key, html}]). Only new or
+    // content-changed trees are (re)built; unchanged ones are at most moved.
+    function reconcileTrees(trees) {
+      const desired = new Set(trees.map(function (t) { return t.key; }));
+      treeNodes.forEach(function (entry, key) {
+        if (!desired.has(key)) {
+          entry.el.remove();
+          treeNodes.delete(key);
+        }
+      });
+      // Build or replace changed trees (positioning happens in the next pass).
+      trees.forEach(function (t) {
+        const entry = treeNodes.get(t.key);
+        if (!entry) {
+          treeNodes.set(t.key, { el: elementFromHtml(t.html), html: t.html });
+        } else if (entry.html !== t.html) {
+          const el = elementFromHtml(t.html);
+          if (entry.el.parentNode) entry.el.replaceWith(el);
+          entry.el = el;
+          entry.html = t.html;
+        }
+      });
+      // Order children to match `trees`, moving only nodes that are out of place.
+      let ref = treeEl.firstChild;
+      trees.forEach(function (t) {
+        const el = treeNodes.get(t.key).el;
+        if (el === ref) {
+          ref = ref.nextSibling;
+        } else {
+          treeEl.insertBefore(el, ref);
+        }
+      });
+    }
+
     function render() {
-      if (!messages.length) {
+      const trees = messages.length ? TreeView.render(messages) : [];
+      if (!trees.length) {
+        treeEl = null;
+        treeNodes.clear();
         list.innerHTML = '<div class="empty-state">No messages yet.</div>';
         return;
       }
-      list.innerHTML = TreeView.render(messages);
+      if (!treeEl || !treeEl.isConnected) {
+        list.innerHTML = "";
+        treeEl = document.createElement("div");
+        treeEl.className = "msg-tree";
+        list.appendChild(treeEl);
+        treeNodes.clear();
+      }
+      reconcileTrees(trees);
     }
 
     function isNearBottom() {
