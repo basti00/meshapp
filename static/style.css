@@ -412,10 +412,11 @@ html:has(.messages-page) { scrollbar-gutter: auto; }
 body:has(.messages-page) {
   display: flex;
   flex-direction: column;
-  /* svh (smallest viewport, toolbars shown) keeps the locked body from ever
-     exceeding the visible area -- dvh can resolve to the toolbar-collapsed
-     height, which pushes the newest message behind the iOS Safari toolbar. */
-  height: 100svh;
+  /* --app-height is set from window.visualViewport.height (see messages.html),
+     the only measure that reliably excludes the iOS Safari toolbar -- svh/dvh
+     and env(safe-area-inset-bottom) leave the newest message behind it. The
+     svh fallback covers browsers without the JS hook. */
+  height: var(--app-height, 100svh);
   overflow: hidden;
 }
 

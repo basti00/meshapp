@@ -23,6 +23,26 @@
 {% block scripts %}
 <script id="messages-data" type="application/json">{{ messages | tojson }}</script>
 <script>
+  // Lock the page to the genuinely visible height. iOS Safari overlays a
+  // floating bottom toolbar that svh/dvh and safe-area insets don't account
+  // for; visualViewport.height is the only measure that excludes it, so the
+  // newest message clears the toolbar. Falls back to the CSS svh value.
+  (function () {
+    const vv = window.visualViewport;
+    function setAppHeight() {
+      const h = vv ? vv.height : window.innerHeight;
+      document.documentElement.style.setProperty("--app-height", h + "px");
+    }
+    setAppHeight();
+    if (vv) {
+      vv.addEventListener("resize", setAppHeight);
+      vv.addEventListener("scroll", setAppHeight);
+    }
+    window.addEventListener("resize", setAppHeight);
+    window.addEventListener("orientationchange", setAppHeight);
+  })();
+</script>
+<script>
   (function () {
     const refreshSeconds = {{ auto_refresh_seconds or 0 }};
     const channelKey = {{ current_channel.channel_key | tojson }};
