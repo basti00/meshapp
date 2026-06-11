@@ -417,6 +417,9 @@ body:has(.messages-page) {
      and env(safe-area-inset-bottom) leave the newest message behind it. The
      svh fallback covers browsers without the JS hook. */
   height: var(--app-height, 100svh);
+  /* The base `body { min-height: 100vh }` (largest viewport) otherwise wins
+     over height above and stretches the body back under the toolbar. */
+  min-height: 0;
   overflow: hidden;
 }
 
