@@ -8,11 +8,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify, redirect, render_template, url_for
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 from meshtastic.serial_interface import SerialInterface
 from pubsub import pub
 
-DB_SCHEMA_VERSION = 6
+DB_SCHEMA_VERSION = 7
 DB_PATH = Path(__file__).with_name("meshapp.db")
 DEVICE_PATH = os.environ.get("MESH_DEVICE", "/dev/ttyACM0")
 DEFAULT_CHANNEL_INDEX = int(os.environ.get("MESH_CHANNEL", "0"))
@@ -266,8 +266,14 @@ NODE_COLUMNS = [
 
 # Columns added to the messages table after its original schema; kept here so
 # existing databases get migrated via _ensure_columns().
+#   reply_id    - the packet id this message replies to (mirrors decoded.replyId)
+#   thread_root - packet id of the root of this message's reply chain; every
+#                 message in one conversation tree shares it, which is what
+#                 lets us paginate by whole tree (see _load_channel_threads).
 MESSAGE_COLUMNS = [
     ("packet_id", "INTEGER"),
+    ("reply_id", "INTEGER"),
+    ("thread_root", "INTEGER"),
 ]
 
 # Fields that, once set, must not be overwritten by later upserts.
@@ -324,7 +330,11 @@ def init_db():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_packet_id ON messages(packet_id)"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(channel_key, thread_root)"
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes(last_seen DESC)")
+        _backfill_threads(conn)
         conn.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
         conn.commit()
 
@@ -351,12 +361,96 @@ def _upsert_node(node_id, **updates):
         conn.commit()
 
 
+def _resolve_thread_root(conn, channel_key, packet_id, reply_id):
+    """Pick the thread_root for a message.
+
+    A message that replies to a stored parent inherits the parent's root, so
+    the whole conversation shares one root. A root message (no reply) or a
+    reply whose parent hasn't been received yet roots its own thread via its
+    packet id. Messages without a packet id can't be threaded; they stay NULL
+    and are treated as singletons at read time (COALESCE(thread_root, -id)).
+    """
+    if reply_id is not None:
+        row = conn.execute(
+            "SELECT thread_root FROM messages "
+            "WHERE channel_key = ? AND packet_id = ? AND thread_root IS NOT NULL "
+            "ORDER BY rx_time LIMIT 1",
+            (channel_key, reply_id),
+        ).fetchone()
+        if row and row["thread_root"] is not None:
+            return row["thread_root"]
+    return packet_id
+
+
+def _reconcile_thread_root(conn, channel_key, packet_id, thread_root):
+    """Adopt replies that arrived before this (their parent) message.
+
+    When a parent is received after its replies, those replies will have
+    rooted themselves (thread_root == own packet_id). Re-stamp each such
+    stranded reply and its descendants -- which all share that stranded root
+    -- onto this message's thread, merging the two trees into one.
+    """
+    if packet_id is None or thread_root is None:
+        return
+    stranded = conn.execute(
+        "SELECT DISTINCT packet_id FROM messages "
+        "WHERE channel_key = ? AND reply_id = ? AND packet_id IS NOT NULL "
+        "AND thread_root = packet_id",
+        (channel_key, packet_id),
+    ).fetchall()
+    for row in stranded:
+        old_root = row["packet_id"]
+        if old_root == thread_root:
+            continue
+        conn.execute(
+            "UPDATE messages SET thread_root = ? WHERE channel_key = ? AND thread_root = ?",
+            (thread_root, channel_key, old_root),
+        )
+
+
+def _backfill_threads(conn):
+    """One-time migration: populate reply_id/thread_root for legacy rows.
+
+    Processes oldest-first so a parent is normally rooted before its replies,
+    then reconciles to catch any reply that predates its parent. Runs only
+    while rows still lack a thread_root, so it is a no-op once migrated.
+    """
+    rows = conn.execute(
+        "SELECT id, channel_key, packet_id, decoded_json, raw_json FROM messages "
+        "WHERE thread_root IS NULL ORDER BY rx_time, id"
+    ).fetchall()
+    for row in rows:
+        decoded = _safe_json_loads(row["decoded_json"])
+        reply_id = None
+        if isinstance(decoded, dict):
+            reply_id = _coerce_int(decoded.get("replyId") or decoded.get("reply_id"))
+        packet_id = row["packet_id"]
+        if packet_id is None:
+            raw = _safe_json_loads(row["raw_json"])
+            if isinstance(raw, dict):
+                packet_id = _coerce_int(raw.get("id"))
+        thread_root = _resolve_thread_root(conn, row["channel_key"], packet_id, reply_id)
+        conn.execute(
+            "UPDATE messages SET reply_id = ?, thread_root = ?, "
+            "packet_id = COALESCE(packet_id, ?) WHERE id = ?",
+            (reply_id, thread_root, packet_id, row["id"]),
+        )
+        _reconcile_thread_root(conn, row["channel_key"], packet_id, thread_root)
+
+
 def _insert_message(**message):
-    columns = list(message.keys())
-    placeholders = ", ".join(["?"] * len(columns))
-    sql = f"INSERT INTO messages ({', '.join(columns)}) VALUES ({placeholders})"
+    """Insert a message, stamping its thread_root and adopting any earlier
+    replies that were waiting for it."""
+    channel_key = message.get("channel_key")
+    packet_id = message.get("packet_id")
+    reply_id = message.get("reply_id")
     with _db_connect() as conn:
+        message["thread_root"] = _resolve_thread_root(conn, channel_key, packet_id, reply_id)
+        columns = list(message.keys())
+        placeholders = ", ".join(["?"] * len(columns))
+        sql = f"INSERT INTO messages ({', '.join(columns)}) VALUES ({placeholders})"
         conn.execute(sql, list(message.values()))
+        _reconcile_thread_root(conn, channel_key, packet_id, message["thread_root"])
         conn.commit()
 
 
@@ -659,6 +753,9 @@ def handle_packet(packet, interface=None):
     non_message_type = _classify_non_message(message_text, portnum, telemetry, position, nodeinfo)
 
     if message_text:
+        reply_id = None
+        if isinstance(decoded, dict):
+            reply_id = _coerce_int(decoded.get("replyId") or decoded.get("reply_id"))
         _insert_message(
             rx_time=rx_time,
             channel_index=channel_index,
@@ -671,6 +768,7 @@ def handle_packet(packet, interface=None):
             rx_rssi=packet.get("rxRssi"),
             rx_snr=packet.get("rxSnr"),
             packet_id=_coerce_int(packet.get("id")),
+            reply_id=reply_id,
             decoded_json=_json_dumps(decoded),
             raw_json=_json_dumps(packet),
         )
@@ -788,55 +886,142 @@ def _find_channel_info(channels, channel_key):
     return {"channel_key": channel_key, "channel_index": None}
 
 
-def _load_channel_messages(channel_key):
-    """Fetch a channel's messages enriched with reply linkage.
+# Threads per page for the message list's scroll-back pagination.
+TREE_PAGE_SIZE = 40
 
-    Each row carries ``packet_id`` (the mesh packet id, used as the reply
-    target) and ``reply_id`` (the packet id this message replies to, or None).
-    Together they let the client wire up threaded trees without extra
-    round-trips. Tapbacks are flagged via ``is_tapback``.
+# Shared column list for message reads. ``thread_root`` is exposed (with a
+# per-row fallback for un-threadable rows) so the client can tell which tree a
+# message belongs to when merging live updates.
+_MESSAGE_SELECT = """
+    m.id, m.rx_time, m.channel_index, m.channel_key,
+    m.from_id, m.to_id, m.hops, m.portnum, m.text,
+    m.rx_rssi, m.rx_snr, m.packet_id, m.reply_id,
+    COALESCE(m.thread_root, -m.id) AS thread_root,
+    m.decoded_json, m.raw_json,
+    n.short_name, n.long_name
+"""
+
+
+def _row_to_message(row):
+    """Enrich a message row: reply linkage, tapback flag, avatar colors."""
+    message = dict(row)
+    decoded = _safe_json_loads(message.pop("decoded_json", None))
+    raw = _safe_json_loads(message.pop("raw_json", None))
+    emoji = None
+    if isinstance(decoded, dict):
+        emoji = decoded.get("emoji")
+        # Legacy rows have no reply_id column value; recover it from decoded.
+        if message.get("reply_id") is None:
+            message["reply_id"] = decoded.get("replyId") or decoded.get("reply_id")
+    if message.get("packet_id") is None and isinstance(raw, dict):
+        message["packet_id"] = _coerce_int(raw.get("id"))
+    message["reply_id"] = _coerce_int(message.get("reply_id"))
+    message["is_tapback"] = bool(emoji)
+    message.update(_node_avatar_colors(message.get("from_id")))
+    return message
+
+
+def _parse_cursor(value):
+    """Parse a ``<recency>:<root>`` pagination cursor into a tuple, or None."""
+    if not value:
+        return None
+    try:
+        recency, root = value.split(":")
+        return (int(recency), int(root))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _select_thread_page(conn, channel_key, before, limit):
+    """Pick the newest ``limit`` thread roots, ordered by recency (newest
+    first). ``before`` is a ``(recency, root)`` keyset cursor for older pages."""
+    params = [channel_key]
+    having = ""
+    if before is not None:
+        recency, root = before
+        having = "HAVING recency < ? OR (recency = ? AND root < ?)"
+        params.extend([recency, recency, root])
+    params.append(limit)
+    return conn.execute(
+        f"""
+        SELECT root, MAX(rx_time) AS recency FROM (
+            SELECT COALESCE(thread_root, -id) AS root, rx_time
+            FROM messages WHERE channel_key = ?
+        ) GROUP BY root
+        {having}
+        ORDER BY recency DESC, root DESC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+
+
+def _load_channel_threads(channel_key, before=None, limit=TREE_PAGE_SIZE):
+    """Load one page of whole conversation trees, newest trees last.
+
+    Pagination is by tree (not message): each page is a run of complete trees
+    ordered by recency, so a tree's replies and tapbacks always travel
+    together. ``before`` is a ``<recency>:<root>`` cursor string (or None for
+    the newest page). Returns ``(messages, next_cursor)``; ``next_cursor`` is a
+    cursor string, or None once the start of history is reached.
+    """
+    with _db_connect() as conn:
+        roots = _select_thread_page(conn, channel_key, _parse_cursor(before), limit)
+        if not roots:
+            return [], None
+        root_values = [r["root"] for r in roots]
+        placeholders = ",".join("?" * len(root_values))
+        rows = conn.execute(
+            f"""
+            SELECT {_MESSAGE_SELECT}
+            FROM messages m
+            LEFT JOIN nodes n ON n.node_id = m.from_id
+            WHERE m.channel_key = ? AND COALESCE(m.thread_root, -m.id) IN ({placeholders})
+            ORDER BY m.rx_time ASC, m.id ASC
+            """,
+            [channel_key, *root_values],
+        ).fetchall()
+    messages_list = [_row_to_message(row) for row in rows]
+    # The oldest tree on this page is the cursor for the next, older page. A
+    # short page means there are no older trees left.
+    next_cursor = None
+    if len(roots) == limit:
+        last = roots[-1]
+        next_cursor = f"{last['recency']}:{last['root']}"
+    return messages_list, next_cursor
+
+
+def _load_thread_updates(channel_key, since):
+    """Return every message of any tree with activity at/after ``since``.
+
+    Whole touched trees are returned (not just the new rows) so the client can
+    drop in a complete tree -- including ones bumped forward from a page it had
+    never loaded -- and simply re-sort by recency.
     """
     with _db_connect() as conn:
         rows = conn.execute(
-            """
-            SELECT m.id, m.rx_time, m.channel_index, m.channel_key,
-                   m.from_id, m.to_id, m.hops, m.portnum, m.text,
-                   m.rx_rssi, m.rx_snr, m.packet_id, m.decoded_json, m.raw_json,
-                   n.short_name, n.long_name
+            f"""
+            SELECT {_MESSAGE_SELECT}
             FROM messages m
             LEFT JOIN nodes n ON n.node_id = m.from_id
-            WHERE m.channel_key = ?
-            ORDER BY m.rx_time DESC
-            LIMIT 500
+            WHERE m.channel_key = ? AND COALESCE(m.thread_root, -m.id) IN (
+                SELECT COALESCE(thread_root, -id) FROM messages
+                WHERE channel_key = ? AND rx_time >= ?
+            )
+            ORDER BY m.rx_time ASC, m.id ASC
             """,
-            (channel_key,),
+            (channel_key, channel_key, since),
         ).fetchall()
-    messages_list = []
-    for row in rows:
-        message = dict(row)
-        decoded = _safe_json_loads(message.pop("decoded_json", None))
-        raw = _safe_json_loads(message.pop("raw_json", None))
-        reply_id = None
-        emoji = None
-        if isinstance(decoded, dict):
-            reply_id = decoded.get("replyId") or decoded.get("reply_id")
-            emoji = decoded.get("emoji")
-        # Older rows predate the packet_id column; fall back to raw_json.
-        if message.get("packet_id") is None and isinstance(raw, dict):
-            message["packet_id"] = _coerce_int(raw.get("id"))
-        message["reply_id"] = _coerce_int(reply_id)
-        message["is_tapback"] = bool(emoji)
-        message.update(_node_avatar_colors(message.get("from_id")))
-        messages_list.append(message)
-    return messages_list
+    return [_row_to_message(row) for row in rows]
 
 
 def _render_messages(channel_key, channels):
-    messages_list = _load_channel_messages(channel_key)
+    messages_list, next_cursor = _load_channel_threads(channel_key)
     current_channel = _find_channel_info(channels, channel_key)
     return render_template(
         "messages.html",
         messages=messages_list,
+        next_cursor=next_cursor,
         channels=channels,
         current_channel=current_channel,
         auto_refresh_seconds=AUTO_REFRESH_SECONDS,
@@ -845,7 +1030,16 @@ def _render_messages(channel_key, channels):
 
 @app.route("/api/messages/<channel_key>")
 def messages_api(channel_key):
-    return jsonify({"messages": _load_channel_messages(channel_key)})
+    messages_list, next_cursor = _load_channel_threads(
+        channel_key, before=request.args.get("before")
+    )
+    return jsonify({"messages": messages_list, "next_cursor": next_cursor})
+
+
+@app.route("/api/messages/<channel_key>/updates")
+def messages_updates_api(channel_key):
+    since = _coerce_int(request.args.get("since")) or 0
+    return jsonify({"messages": _load_thread_updates(channel_key, since)})
 
 
 @app.route("/messages")

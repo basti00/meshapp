@@ -36,6 +36,29 @@
       messages = [];
     }
 
+    // Pagination is by whole tree, newest trees at the bottom. `nextCursor`
+    // points at the next older page (null = start of history reached).
+    let nextCursor = {{ next_cursor | tojson }};
+    let loadingOlder = false;
+
+    // Messages are immutable and append-only, so merging by id (with the newer
+    // copy winning) always yields a consistent buffer -- no deletions needed.
+    function mergeMessages(primary, secondary) {
+      const byId = new Map();
+      secondary.forEach(function (m) { byId.set(m.id, m); });
+      primary.forEach(function (m) { byId.set(m.id, m); });
+      messages = Array.from(byId.values());
+    }
+
+    function maxRxTime() {
+      let max = 0;
+      messages.forEach(function (m) {
+        const t = Number(m.rx_time) || 0;
+        if (t > max) max = t;
+      });
+      return max;
+    }
+
     // ---------- Shared rendering helpers ----------
     function renderMeta(msg) {
       const parts = [];
@@ -249,18 +272,57 @@
       if (stick) list.scrollTop = list.scrollHeight;
     }
 
+    // Scroll-back: when the user nears the top, fetch the next older page of
+    // whole trees and prepend it, holding the viewport steady by absorbing the
+    // height the newly rendered trees added above.
+    async function loadOlder() {
+      if (loadingOlder || !nextCursor || channelKey === null || channelKey === undefined) return;
+      loadingOlder = true;
+      try {
+        const url = `/api/messages/${encodeURIComponent(channelKey)}?before=${encodeURIComponent(nextCursor)}`;
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        const older = payload.messages || [];
+        nextCursor = payload.next_cursor || null;
+        if (!older.length) return;
+        const beforeHeight = list.scrollHeight;
+        const beforeTop = list.scrollTop;
+        mergeMessages(messages, older); // existing (newer) copies win on overlap
+        render();
+        list.scrollTop = beforeTop + (list.scrollHeight - beforeHeight);
+      } catch (e) {
+        console.warn("Failed to load older messages", e);
+      } finally {
+        loadingOlder = false;
+      }
+    }
+
+    // Live updates: pull whole trees touched since our newest message. New
+    // rows bump their tree's recency, so re-rendering re-sorts them to the
+    // bottom -- pulling an old tree forward if it just got a reply.
     async function refresh() {
       if (channelKey === null || channelKey === undefined) return;
       try {
-        const response = await fetch(`/api/messages/${encodeURIComponent(channelKey)}`, { cache: "no-store" });
+        const since = maxRxTime();
+        const url = `/api/messages/${encodeURIComponent(channelKey)}/updates?since=${since}`;
+        const response = await fetch(url, { cache: "no-store" });
         if (!response.ok) return;
         const payload = await response.json();
-        messages = payload.messages || [];
+        const incoming = payload.messages || [];
+        const known = new Set(messages.map(function (m) { return m.id; }));
+        const hasNew = incoming.some(function (m) { return !known.has(m.id); });
+        if (!hasNew) return; // nothing actually changed
+        mergeMessages(incoming, messages); // incoming (fresh tree) wins on overlap
         renderAndScroll(false);
       } catch (e) {
         console.warn("Failed to refresh messages", e);
       }
     }
+
+    list.addEventListener("scroll", function () {
+      if (list.scrollTop < 120) loadOlder();
+    });
 
     renderAndScroll(true);
     if (refreshSeconds > 0) setInterval(refresh, refreshSeconds * 1000);
