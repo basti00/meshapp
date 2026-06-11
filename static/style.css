@@ -457,7 +457,8 @@ body:has(.messages-page) main {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 6px 8px;
+  /* Extra bottom padding clears the iOS Safari bottom toolbar / home bar. */
+  padding: 4px 6px calc(8px + env(safe-area-inset-bottom));
 }
 
 .message-list:focus-visible {
@@ -913,7 +914,7 @@ button.msg-quote:hover .msg-quote__go { color: var(--accent); }
 
   /* Scale message bubbles and text ~10% smaller to fit more on screen. */
   .messages-page h1 { font-size: clamp(17px, 5vw, 20px); }
-  .message-list { gap: 8px; padding: 4px 4px 6px; }
+  .message-list { gap: 8px; padding: 4px 4px calc(6px + env(safe-area-inset-bottom)); }
   .bubble { padding: 10px 12px; gap: 7px; border-radius: 12px; }
   .bubble__body { font-size: 13.5px; }
   .bubble__body--meta { font-size: 12px; }
