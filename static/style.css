@@ -947,6 +947,19 @@ button.msg-quote:hover .msg-quote__go { color: var(--accent); }
   outline-offset: 2px;
 }
 
+.json-section {
+  margin-top: 12px;
+}
+
+.json-section__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }

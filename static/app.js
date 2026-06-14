@@ -256,6 +256,38 @@
       .join("");
   }
 
+  // Render the on-demand combined JSON ({ raw, derived }) as one collapsible
+  // block with a labeled, read-only textarea per section, so the user can
+  // clearly see what came off the mesh vs. what we computed/stored.
+  function renderJsonSections(sections, rawLabel) {
+    if (!sections || typeof sections !== "object") return "";
+    const order = [
+      ["raw", rawLabel || "Raw (from meshtastic)"],
+      ["derived", "Derived (computed & stored by us)"],
+    ];
+    const blocks = order
+      .filter(([key]) => sections[key] !== undefined && sections[key] !== null)
+      .map(([key, label]) => {
+        const json = JSON.stringify(sections[key], null, 2);
+        const rows = Math.min(20, Math.max(3, json.split("\n").length));
+        return (
+          `<div class="json-section">` +
+          `<h4 class="json-section__title">${escapeHtml(label)}</h4>` +
+          `<textarea class="msg-raw__text" readonly rows="${rows}" spellcheck="false" ` +
+          `aria-label="${escapeHtml(label)} JSON">${escapeHtml(json)}</textarea>` +
+          `</div>`
+        );
+      })
+      .join("");
+    if (!blocks) return "";
+    return (
+      `<details class="msg-raw">` +
+      `<summary class="msg-raw__toggle">JSON</summary>` +
+      blocks +
+      `</details>`
+    );
+  }
+
   function renderDetail(node) {
     const avatar = document.getElementById("node-modal-avatar");
     const titleName = document.getElementById("node-modal-name");
@@ -337,7 +369,10 @@
       ["Position", position],
     ];
 
-    const html = renderSections(sections);
+    const html = renderSections(sections) + renderJsonSections(
+      node.sections,
+      "Raw (from meshtastic, accumulated from diff. packet types)"
+    );
 
     if (body) {
       body.innerHTML = html || '<p class="muted">No data recorded for this node yet.</p>';
@@ -543,12 +578,7 @@
       ["Packet", packet],
     ];
 
-    const rawJson = JSON.stringify(message, null, 2);
-    const rawHtml = `<details class="msg-raw">` +
-      `<summary class="msg-raw__toggle">Raw JSON</summary>` +
-      `<textarea class="msg-raw__text" readonly rows="14" spellcheck="false" ` +
-      `aria-label="Raw message JSON">${escapeHtml(rawJson)}</textarea>` +
-      `</details>`;
+    const rawHtml = renderJsonSections(message.sections);
 
     if (body) {
       body.innerHTML = convo + renderSections(sections) + rawHtml;

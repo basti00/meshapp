@@ -12,7 +12,7 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 from meshtastic.serial_interface import SerialInterface
 from pubsub import pub
 
-DB_SCHEMA_VERSION = 7
+DB_SCHEMA_VERSION = 9
 DB_PATH = Path(__file__).with_name("meshapp.db")
 DEVICE_PATH = os.environ.get("MESH_DEVICE", "/dev/ttyACM0")
 DEFAULT_CHANNEL_INDEX = int(os.environ.get("MESH_CHANNEL", "0"))
@@ -227,23 +227,32 @@ def _db_connect():
     return conn
 
 
+# Node columns are grouped by section. Everything here is a value we either
+# read straight off the mesh and promote to a column for cheap querying, or a
+# value we computed/normalised ourselves. The *raw* meshtastic payloads are
+# kept verbatim in the raw_*_json blobs at the end; the on-demand "sections"
+# JSON shown in the UI is assembled from these (see _node_sections()).
 NODE_COLUMNS = [
+    # --- Identity (extracted from the raw NODEINFO user) ---
     ("short_name", "TEXT"),
     ("long_name", "TEXT"),
     ("hw_model", "TEXT"),
     ("role", "TEXT"),
     ("macaddr", "TEXT"),
     ("public_key", "TEXT"),
+    # --- Lifecycle timestamps (ours) ---
     ("first_seen", "INTEGER"),
     ("last_seen", "INTEGER"),
     ("last_ping", "INTEGER"),
     ("last_hops", "INTEGER"),
     ("last_telemetry", "INTEGER"),
     ("last_position", "INTEGER"),
-    ("last_rx_snr", "REAL"),
-    ("last_rx_rssi", "REAL"),
     ("online_since", "INTEGER"),
     ("uptime_seconds", "INTEGER"),
+    # --- Signal of the last received packet ---
+    ("last_rx_snr", "REAL"),
+    ("last_rx_rssi", "REAL"),
+    # --- Latest sensor values (extracted from raw telemetry) ---
     ("battery_level", "REAL"),
     ("battery_voltage", "REAL"),
     ("channel_utilization", "REAL"),
@@ -251,8 +260,7 @@ NODE_COLUMNS = [
     ("temperature", "REAL"),
     ("humidity", "REAL"),
     ("pressure", "REAL"),
-    ("telemetry_json", "TEXT"),
-    ("position_json", "TEXT"),
+    # --- Activity counters (ours) ---
     ("non_message_day", "TEXT"),
     ("telemetry_count_total", "INTEGER DEFAULT 0"),
     ("telemetry_count_daily", "INTEGER DEFAULT 0"),
@@ -262,29 +270,102 @@ NODE_COLUMNS = [
     ("position_count_daily", "INTEGER DEFAULT 0"),
     ("other_count_total", "INTEGER DEFAULT 0"),
     ("other_count_daily", "INTEGER DEFAULT 0"),
+    # --- Raw meshtastic record, verbatim ---
+    # A snapshot of the device's accumulated node-DB entry (interface.nodes),
+    # which merges every packet type (user/name, position, deviceMetrics,
+    # lastHeard, ...). This is the whole "what the device knows" picture, not a
+    # single packet's slice -- see _lookup_interface_node().
+    ("raw_node_json", "TEXT"),
+]
+
+# Blob columns from earlier schemas, superseded by raw_node_json. Dropped in
+# place where SQLite supports DROP COLUMN (>= 3.35); otherwise left dormant.
+# Their data is reconstructed from the live device on the next packet.
+NODE_DROP_COLUMNS = [
+    "telemetry_json", "position_json",          # schema <= 7
+    "raw_user_json", "raw_telemetry_json", "raw_position_json",  # schema 8
 ]
 
 # Columns added to the messages table after its original schema; kept here so
 # existing databases get migrated via _ensure_columns().
+#   packet_id   - the mesh packet id (mirrors raw_json.id)
 #   reply_id    - the packet id this message replies to (mirrors decoded.replyId)
 #   thread_root - packet id of the root of this message's reply chain; every
 #                 message in one conversation tree shares it, which is what
 #                 lets us paginate by whole tree (see _load_channel_threads).
+#   emoji       - the tapback reaction emoji, or NULL for a normal message;
+#                 promoted to a column so list reads never parse JSON.
+# The full packet lives verbatim in raw_json (which contains `decoded`), so the
+# old decoded_json column is redundant and no longer written.
 MESSAGE_COLUMNS = [
     ("packet_id", "INTEGER"),
     ("reply_id", "INTEGER"),
     ("thread_root", "INTEGER"),
+    ("emoji", "TEXT"),
 ]
 
 # Fields that, once set, must not be overwritten by later upserts.
 PRESERVE_IF_EXISTS = {"first_seen"}
 
 
+def _table_columns(conn, table):
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
 def _ensure_columns(conn, table, columns):
-    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    existing = _table_columns(conn, table)
     for name, decl in columns:
         if name not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
+def _drop_columns(conn, table, columns):
+    """Drop ``columns`` from ``table`` if present. Uses ALTER TABLE DROP COLUMN
+    (SQLite >= 3.35); on older engines the column is left in place, dormant and
+    no longer written."""
+    existing = _table_columns(conn, table)
+    for name in columns:
+        if name in existing:
+            try:
+                conn.execute(f"ALTER TABLE {table} DROP COLUMN {name}")
+            except sqlite3.OperationalError:
+                pass
+
+
+def _backfill_message_emoji(conn):
+    """Populate the new emoji column for legacy rows from their stored JSON.
+
+    Reads the tapback emoji out of raw_json.decoded (older rows may instead
+    have a standalone decoded_json column). Runs only while emoji is NULL, so
+    it is a no-op once migrated."""
+    existing = _table_columns(conn, "messages")
+    sources = ["raw_json"]
+    if "decoded_json" in existing:
+        sources.append("decoded_json")
+    rows = conn.execute(
+        f"SELECT id, {', '.join(sources)} FROM messages WHERE emoji IS NULL"
+    ).fetchall()
+    for row in rows:
+        emoji = None
+        for source in sources:
+            blob = _safe_json_loads(row[source])
+            if isinstance(blob, dict):
+                # raw_json nests the payload under "decoded"; decoded_json is it.
+                decoded = blob.get("decoded") if "decoded" in blob else blob
+                if isinstance(decoded, dict) and decoded.get("emoji"):
+                    emoji = _coerce_str(decoded.get("emoji"))
+                    break
+        if emoji is not None:
+            conn.execute("UPDATE messages SET emoji = ? WHERE id = ?", (emoji, row["id"]))
+
+    # The full packet lives in raw_json (which contains `decoded`), so the old
+    # standalone column is redundant. Drop it where SQLite supports DROP COLUMN
+    # (>= 3.35); on older engines it stays as a harmless, no-longer-written column.
+    if "decoded_json" in existing:
+        try:
+            conn.execute("ALTER TABLE messages DROP COLUMN decoded_json")
+        except sqlite3.OperationalError:
+            pass
 
 
 def init_db():
@@ -306,7 +387,6 @@ def init_db():
                 rx_rssi REAL,
                 rx_snr REAL,
                 packet_id INTEGER,
-                decoded_json TEXT,
                 raw_json TEXT
             )
             """
@@ -324,6 +404,8 @@ def init_db():
         )
         _ensure_columns(conn, "nodes", NODE_COLUMNS)
         _ensure_columns(conn, "messages", MESSAGE_COLUMNS)
+        _drop_columns(conn, "nodes", NODE_DROP_COLUMNS)
+        _backfill_message_emoji(conn)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_channel_key_time ON messages(channel_key, rx_time DESC)"
         )
@@ -416,19 +498,18 @@ def _backfill_threads(conn):
     while rows still lack a thread_root, so it is a no-op once migrated.
     """
     rows = conn.execute(
-        "SELECT id, channel_key, packet_id, decoded_json, raw_json FROM messages "
+        "SELECT id, channel_key, packet_id, raw_json FROM messages "
         "WHERE thread_root IS NULL ORDER BY rx_time, id"
     ).fetchall()
     for row in rows:
-        decoded = _safe_json_loads(row["decoded_json"])
+        raw = _safe_json_loads(row["raw_json"])
+        decoded = raw.get("decoded") if isinstance(raw, dict) else None
         reply_id = None
         if isinstance(decoded, dict):
             reply_id = _coerce_int(decoded.get("replyId") or decoded.get("reply_id"))
         packet_id = row["packet_id"]
-        if packet_id is None:
-            raw = _safe_json_loads(row["raw_json"])
-            if isinstance(raw, dict):
-                packet_id = _coerce_int(raw.get("id"))
+        if packet_id is None and isinstance(raw, dict):
+            packet_id = _coerce_int(raw.get("id"))
         thread_root = _resolve_thread_root(conn, row["channel_key"], packet_id, reply_id)
         conn.execute(
             "UPDATE messages SET reply_id = ?, thread_root = ?, "
@@ -589,12 +670,19 @@ def _extract_nodeinfo(decoded):
     }
 
 
-def _extract_nodeinfo_from_interface(interface, node_id):
+def _lookup_interface_node(interface, node_id):
+    """Return the device's accumulated node-DB entry for ``node_id``.
+
+    ``interface.nodes`` is the device's merged per-node record -- it carries
+    everything learned from every packet type (the NODEINFO user/name, latest
+    position, deviceMetrics, lastHeard, hopsAway, ...), which a single packet
+    never has on its own. Returns the dict, or None if not found.
+    """
     if interface is None or not node_id:
-        return {}
+        return None
     nodes = getattr(interface, "nodes", None)
     if not isinstance(nodes, dict):
-        return {}
+        return None
 
     keys_to_try = [node_id]
     if isinstance(node_id, str):
@@ -608,18 +696,22 @@ def _extract_nodeinfo_from_interface(interface, node_id):
     if isinstance(node_id, int):
         keys_to_try.append(f"!{node_id:08x}")
 
-    node_meta = None
     for key in keys_to_try:
         if key in nodes:
             node_meta = nodes.get(key)
-            break
+            if isinstance(node_meta, dict):
+                return node_meta
 
-    if node_meta is None and isinstance(node_id, str):
+    if isinstance(node_id, str):
         for key, value in nodes.items():
             if isinstance(key, str) and key.lower() == node_id.lower():
-                node_meta = value
-                break
+                if isinstance(value, dict):
+                    return value
+    return None
 
+
+def _extract_nodeinfo_from_interface(interface, node_id):
+    node_meta = _lookup_interface_node(interface, node_id)
     if not isinstance(node_meta, dict):
         return {}
 
@@ -754,8 +846,10 @@ def handle_packet(packet, interface=None):
 
     if message_text:
         reply_id = None
+        emoji = None
         if isinstance(decoded, dict):
             reply_id = _coerce_int(decoded.get("replyId") or decoded.get("reply_id"))
+            emoji = _coerce_str(decoded.get("emoji")) if decoded.get("emoji") else None
         _insert_message(
             rx_time=rx_time,
             channel_index=channel_index,
@@ -769,7 +863,7 @@ def handle_packet(packet, interface=None):
             rx_snr=packet.get("rxSnr"),
             packet_id=_coerce_int(packet.get("id")),
             reply_id=reply_id,
-            decoded_json=_json_dumps(decoded),
+            emoji=emoji,
             raw_json=_json_dumps(packet),
         )
 
@@ -778,6 +872,11 @@ def handle_packet(packet, interface=None):
     updates.update(
         {k: v for k, v in _extract_nodeinfo_from_interface(interface, from_id).items() if v is not None}
     )
+    # Snapshot the device's full accumulated record for this node (name +
+    # position + metrics + ...), which a single packet never carries alone.
+    node_meta = _lookup_interface_node(interface, from_id)
+    if isinstance(node_meta, dict) and node_meta:
+        updates["raw_node_json"] = _json_dumps(node_meta)
     if hops is not None:
         updates["last_hops"] = hops
 
@@ -793,7 +892,6 @@ def handle_packet(packet, interface=None):
 
     if telemetry:
         updates["last_telemetry"] = rx_time
-        updates["telemetry_json"] = _json_dumps(telemetry)
         sensor_values = {k: v for k, v in _extract_sensor_values(telemetry).items() if v is not None}
         updates.update(sensor_values)
         uptime_seconds = sensor_values.get("uptime_seconds")
@@ -805,7 +903,6 @@ def handle_packet(packet, interface=None):
 
     if position:
         updates["last_position"] = rx_time
-        updates["position_json"] = _json_dumps(position)
 
     if from_id:
         counts = _get_non_message_counts(from_id)
@@ -895,28 +992,18 @@ TREE_PAGE_SIZE = 40
 _MESSAGE_SELECT = """
     m.id, m.rx_time, m.channel_index, m.channel_key,
     m.from_id, m.to_id, m.hops, m.portnum, m.text,
-    m.rx_rssi, m.rx_snr, m.packet_id, m.reply_id,
+    m.rx_rssi, m.rx_snr, m.packet_id, m.reply_id, m.emoji,
     COALESCE(m.thread_root, -m.id) AS thread_root,
-    m.decoded_json, m.raw_json,
     n.short_name, n.long_name
 """
 
 
 def _row_to_message(row):
-    """Enrich a message row: reply linkage, tapback flag, avatar colors."""
+    """Enrich a message row: tapback flag, avatar colors. All fields come from
+    columns now, so no JSON parsing happens on the list path."""
     message = dict(row)
-    decoded = _safe_json_loads(message.pop("decoded_json", None))
-    raw = _safe_json_loads(message.pop("raw_json", None))
-    emoji = None
-    if isinstance(decoded, dict):
-        emoji = decoded.get("emoji")
-        # Legacy rows have no reply_id column value; recover it from decoded.
-        if message.get("reply_id") is None:
-            message["reply_id"] = decoded.get("replyId") or decoded.get("reply_id")
-    if message.get("packet_id") is None and isinstance(raw, dict):
-        message["packet_id"] = _coerce_int(raw.get("id"))
     message["reply_id"] = _coerce_int(message.get("reply_id"))
-    message["is_tapback"] = bool(emoji)
+    message["is_tapback"] = bool(message.get("emoji"))
     message.update(_node_avatar_colors(message.get("from_id")))
     return message
 
@@ -1057,6 +1144,22 @@ def messages_channel(channel_key):
     return _render_messages(channel_key, channels)
 
 
+# Field membership for the on-demand combined JSON shown when a detail view is
+# expanded. "raw" is the verbatim mesh data; "derived" is everything we
+# computed and stored in columns (identity, threading, sensors, bookkeeping).
+# Keys not listed (joined node names, avatar colors) are presentation-only and
+# stay out of the blob.
+_MSG_DERIVED_KEYS = (
+    "id", "packet_id", "channel_index", "channel_key",
+    "from_id", "to_id", "portnum", "text", "hops", "emoji", "is_tapback",
+    "reply_id", "thread_root", "rx_time",
+)
+
+
+def _pick(record, keys):
+    return {k: record.get(k) for k in keys}
+
+
 @app.route("/api/message/<int:message_id>")
 def message_detail_api(message_id):
     with _db_connect() as conn:
@@ -1073,19 +1176,24 @@ def message_detail_api(message_id):
             return jsonify({"error": "not found", "message_id": message_id}), 404
         message = dict(row)
 
-        decoded = _safe_json_loads(message.pop("decoded_json", None))
         raw = _safe_json_loads(message.pop("raw_json", None))
+        decoded = raw.get("decoded") if isinstance(raw, dict) else None
         message["decoded"] = decoded
         message["raw"] = raw
 
-        reply_id = None
-        emoji = None
+        # Columns are authoritative; fall back to the raw payload for legacy
+        # rows that predate the reply_id/emoji columns.
+        reply_id = message.get("reply_id")
+        emoji = message.get("emoji")
         if isinstance(decoded, dict):
-            reply_id = decoded.get("replyId") or decoded.get("reply_id")
-            emoji = decoded.get("emoji")
-        message["reply_id"] = reply_id
+            if reply_id is None:
+                reply_id = decoded.get("replyId") or decoded.get("reply_id")
+            if emoji is None:
+                emoji = decoded.get("emoji")
+        message["reply_id"] = _coerce_int(reply_id)
         message["emoji"] = emoji
         message["is_tapback"] = bool(emoji)
+        reply_id = message["reply_id"]
 
         reply_to = None
         if reply_id is not None:
@@ -1129,6 +1237,11 @@ def message_detail_api(message_id):
         message["to_node"] = to_node
 
     message.update(_node_avatar_colors(message.get("from_id")))
+    # Combined sections, assembled on demand for the expand-for-JSON view.
+    message["sections"] = {
+        "raw": raw,
+        "derived": _pick(message, _MSG_DERIVED_KEYS),
+    }
     return jsonify({"message": message})
 
 
@@ -1188,6 +1301,23 @@ def nodes_api():
     return jsonify({"nodes": node_list})
 
 
+# Field membership for a node's on-demand combined JSON (see _MSG_DERIVED_KEYS).
+# Everything we computed/stored in columns, presented as one "derived" section.
+_NODE_DERIVED_KEYS = (
+    "node_id",
+    "short_name", "long_name", "hw_model", "role", "macaddr", "public_key",
+    "first_seen", "last_seen", "last_ping", "last_telemetry", "last_position",
+    "last_hops", "last_rx_snr", "last_rx_rssi", "online_since", "uptime_seconds",
+    "battery_level", "battery_voltage", "channel_utilization", "air_util_tx",
+    "temperature", "humidity", "pressure",
+    "non_message_day",
+    "telemetry_count_total", "telemetry_count_daily",
+    "nodeinfo_count_total", "nodeinfo_count_daily",
+    "position_count_total", "position_count_daily",
+    "other_count_total", "other_count_daily",
+)
+
+
 @app.route("/api/nodes/<path:node_id>")
 def node_detail_api(node_id):
     with _db_connect() as conn:
@@ -1199,13 +1329,17 @@ def node_detail_api(node_id):
         return jsonify({"error": "not found", "node_id": node_id}), 404
     node = dict(row)
     node.update(_node_avatar_colors(node.get("node_id")))
-    for key in ("telemetry_json", "position_json"):
-        raw = node.get(key)
-        if isinstance(raw, str) and raw:
-            try:
-                node[key.replace("_json", "")] = json.loads(raw)
-            except (TypeError, ValueError):
-                pass
+
+    # Raw = the device's accumulated node record (one merged object).
+    raw = _safe_json_loads(node.get("raw_node_json")) or {}
+    # Back-compat: the detail view's Position section reads node.position.
+    if isinstance(raw, dict):
+        node["position"] = raw.get("position")
+
+    node["sections"] = {
+        "raw": raw,
+        "derived": _pick(node, _NODE_DERIVED_KEYS),
+    }
     return jsonify({"node": node})
 
 
