@@ -12,7 +12,7 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 from meshtastic.serial_interface import SerialInterface
 from pubsub import pub
 
-DB_SCHEMA_VERSION = 9
+DB_SCHEMA_VERSION = 10
 DB_PATH = Path(__file__).with_name("meshapp.db")
 DEVICE_PATH = os.environ.get("MESH_DEVICE", "/dev/ttyACM0")
 DEFAULT_CHANNEL_INDEX = int(os.environ.get("MESH_CHANNEL", "0"))
@@ -282,6 +282,25 @@ NODE_COLUMNS = [
 PRESERVE_IF_EXISTS = {"first_seen"}
 
 
+# Channel configuration mirrored from the device (localNode.channels). The
+# packet stream only ever carries a channel index, never the name/PSK -- those
+# live on the radio -- so we snapshot them here on connect. Keyed by index.
+CHANNEL_COLUMNS = [
+    ("name", "TEXT"),
+    ("role", "TEXT"),  # PRIMARY / SECONDARY (DISABLED slots are not stored)
+    ("psk", "TEXT"),  # base64, exactly as the Meshtastic app shows it
+    ("psk_hex", "TEXT"),
+    ("psk_size", "INTEGER"),  # byte length: 0 none, 1 default key, 16 AES128, 32 AES256
+    ("uplink_enabled", "INTEGER"),
+    ("downlink_enabled", "INTEGER"),
+    ("position_precision", "INTEGER"),
+    ("raw_json", "TEXT"),
+    ("updated_at", "INTEGER"),
+]
+
+CHANNEL_ROLE_NAMES = {0: "DISABLED", 1: "PRIMARY", 2: "SECONDARY"}
+
+
 def init_db():
     with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
@@ -323,6 +342,17 @@ def init_db():
             )
             """
         )
+        channel_columns_sql = ",\n                ".join(
+            [f"{name} {decl}" for name, decl in CHANNEL_COLUMNS]
+        )
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS channels (
+                channel_index INTEGER PRIMARY KEY,
+                {channel_columns_sql}
+            )
+            """
+        )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_channel_key_time ON messages(channel_key, rx_time DESC)"
         )
@@ -357,6 +387,109 @@ def _upsert_node(node_id, **updates):
     with _db_connect() as conn:
         conn.execute(sql, values)
         conn.commit()
+
+
+def _channel_to_record(channel):
+    """Flatten a Meshtastic Channel protobuf into our column dict."""
+    settings = getattr(channel, "settings", None)
+    index = _coerce_int(getattr(channel, "index", 0)) or 0
+    role = getattr(channel, "role", 0)
+    name = getattr(settings, "name", "") if settings is not None else ""
+    psk_raw = getattr(settings, "psk", b"") if settings is not None else b""
+    psk_bytes = bytes(psk_raw) if psk_raw else b""
+    module_settings = getattr(settings, "module_settings", None) if settings is not None else None
+    position_precision = (
+        _coerce_int(getattr(module_settings, "position_precision", None))
+        if module_settings is not None
+        else None
+    )
+    try:
+        from google.protobuf.json_format import MessageToDict
+
+        raw = MessageToDict(channel, preserving_proto_field_name=True)
+    except Exception:  # pragma: no cover - best effort snapshot
+        raw = None
+    return {
+        "channel_index": index,
+        "name": name or None,
+        "role": CHANNEL_ROLE_NAMES.get(role, str(role)),
+        "psk": base64.b64encode(psk_bytes).decode("ascii") if psk_bytes else "",
+        "psk_hex": psk_bytes.hex(),
+        "psk_size": len(psk_bytes),
+        "uplink_enabled": 1 if (settings is not None and getattr(settings, "uplink_enabled", False)) else 0,
+        "downlink_enabled": 1 if (settings is not None and getattr(settings, "downlink_enabled", False)) else 0,
+        "position_precision": position_precision,
+        "raw_json": _json_dumps(raw) if raw is not None else None,
+        "updated_at": int(time.time()),
+    }
+
+
+def sync_channels(interface):
+    """Snapshot the device's configured channels into the channels table.
+
+    Disabled slots are skipped, and the table is replaced wholesale so it
+    always matches the device's current truth (a renamed/removed channel
+    doesn't leave a stale row behind).
+    """
+    ln = getattr(interface, "localNode", None)
+    channels = getattr(ln, "channels", None) if ln is not None else None
+    if not channels:
+        return
+    records = [
+        _channel_to_record(channel)
+        for channel in channels
+        if getattr(channel, "role", 0) != 0  # skip DISABLED slots
+    ]
+    if not records:
+        return
+    columns = ["channel_index"] + [name for name, _ in CHANNEL_COLUMNS]
+    placeholders = ", ".join(["?"] * len(columns))
+    with _db_connect() as conn:
+        conn.execute("DELETE FROM channels")
+        conn.executemany(
+            f"INSERT INTO channels ({', '.join(columns)}) VALUES ({placeholders})",
+            [[record.get(col) for col in columns] for record in records],
+        )
+        conn.commit()
+    logging.info("Synced %d channel(s) from device", len(records))
+
+
+def _channel_key_to_index(channel_key):
+    """Map a message channel_key back to a device channel index.
+
+    The primary channel rides packets with no index, landing in our "unknown"
+    bucket -> index 0. Secondary channels carry their numeric index directly.
+    """
+    if channel_key in (None, "", "unknown"):
+        return 0
+    try:
+        return int(channel_key)
+    except (TypeError, ValueError):
+        return None
+
+
+def _channel_key_label(psk_size):
+    if psk_size is None:
+        return None
+    if psk_size == 0:
+        return "None (unencrypted)"
+    if psk_size == 1:
+        return "Default key"
+    if psk_size == 16:
+        return "AES-128"
+    if psk_size == 32:
+        return "AES-256"
+    return f"{psk_size * 8}-bit"
+
+
+def _channel_display_name(channel_index, name):
+    if channel_index == 0:
+        return "Primary"
+    if name:
+        return name
+    if channel_index is not None:
+        return f"Channel {channel_index}"
+    return "Channel ?"
 
 
 def _resolve_thread_root(conn, channel_key, packet_id, reply_id):
@@ -808,6 +941,12 @@ def on_receive(packet, interface):
 
 def on_connection(interface, topic=pub.AUTO_TOPIC):
     logging.info("Meshtastic connected on %s", DEVICE_PATH)
+    # By connection.established the device has downloaded its config, so
+    # localNode.channels is populated -- snapshot it for the channel modal.
+    try:
+        sync_channels(interface)
+    except Exception:
+        logging.exception("Failed to sync channels")
 
 
 def on_connection_lost(interface, topic=pub.AUTO_TOPIC):
@@ -840,7 +979,14 @@ def index():
     return redirect(url_for("messages_default"))
 
 
+def _get_channels_config():
+    with _db_connect() as conn:
+        rows = conn.execute("SELECT * FROM channels").fetchall()
+    return {row["channel_index"]: dict(row) for row in rows}
+
+
 def _get_available_channels():
+    config = _get_channels_config()
     with _db_connect() as conn:
         rows = conn.execute(
             """
@@ -851,7 +997,17 @@ def _get_available_channels():
             ORDER BY last_rx DESC
             """
         ).fetchall()
-    return [dict(row) for row in rows]
+    channels = []
+    for row in rows:
+        channel = dict(row)
+        index = _channel_key_to_index(channel.get("channel_key"))
+        if index is None:
+            index = channel.get("channel_index")
+        cfg = config.get(index) if index is not None else None
+        channel["name"] = cfg.get("name") if cfg else None
+        channel["display_name"] = _channel_display_name(index, channel["name"])
+        channels.append(channel)
+    return channels
 
 
 def _pick_default_channel_key(channels):
@@ -1228,6 +1384,41 @@ def node_detail_api(node_id):
         "derived": _pick(node, _NODE_DERIVED_KEYS),
     }
     return jsonify({"node": node})
+
+
+# Field membership for a channel's on-demand combined JSON (see _MSG_DERIVED_KEYS).
+_CHANNEL_DERIVED_KEYS = (
+    "channel_index", "name", "role", "psk", "psk_hex", "psk_size",
+    "uplink_enabled", "downlink_enabled", "position_precision", "updated_at",
+)
+
+
+@app.route("/api/channels/<channel_key>")
+def channel_detail_api(channel_key):
+    channel_index = _channel_key_to_index(channel_key)
+    row = None
+    if channel_index is not None:
+        with _db_connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM channels WHERE channel_index = ?",
+                (channel_index,),
+            ).fetchone()
+
+    channel = dict(row) if row is not None else {}
+    channel["channel_index"] = channel_index
+    channel["channel_key"] = channel_key
+    channel["configured"] = row is not None
+    channel["display_name"] = _channel_display_name(channel_index, channel.get("name"))
+    channel["key_label"] = _channel_key_label(channel.get("psk_size"))
+    channel["uplink_enabled"] = bool(channel.get("uplink_enabled"))
+    channel["downlink_enabled"] = bool(channel.get("downlink_enabled"))
+
+    raw = _safe_json_loads(channel.get("raw_json")) if row is not None else None
+    channel["sections"] = {
+        "raw": raw,
+        "derived": _pick(channel, _CHANNEL_DERIVED_KEYS),
+    }
+    return jsonify({"channel": channel})
 
 
 app.jinja_env.filters["datetime"] = _format_time

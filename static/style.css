@@ -386,22 +386,57 @@ tbody tr:hover { background: var(--panel-hover); }
   margin: 0 0 16px;
 }
 
-.channel-tabs a {
-  padding: 6px 12px;
+.channel-tab {
+  display: inline-flex;
+  align-items: stretch;
   border-radius: 999px;
   border: 1px solid var(--border);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.channel-tab__link {
+  padding: 6px 12px;
   color: var(--muted);
   text-decoration: none;
   font-weight: 600;
-  background: var(--panel);
 }
 
-.channel-tabs a:hover { background: var(--accent-soft); color: var(--accent); }
+.channel-tab__link:hover { color: var(--accent); }
 
-.channel-tabs a.active {
+.channel-tab__info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-style: italic;
+  font-weight: 700;
+  font-family: Georgia, "Times New Roman", serif;
+  cursor: pointer;
+}
+
+.channel-tab__info:hover { background: var(--accent-soft); color: var(--accent); }
+
+.channel-tab.active {
   border-color: var(--accent);
-  color: var(--accent);
   background: var(--accent-soft);
+}
+
+.channel-tab.active .channel-tab__link { color: var(--accent); }
+.channel-tab.active .channel-tab__info { border-left-color: var(--accent); }
+
+.channel-key {
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  word-break: break-all;
+  background: var(--panel-hover, var(--panel));
+  padding: 2px 6px;
+  border-radius: 6px;
 }
 
 /* ---------- Messages page layout ---------- */
@@ -1050,10 +1085,10 @@ button.msg-quote:hover .msg-quote__go { color: var(--accent); }
   table.responsive-stack td.cell-empty { display: none; }
 
   .channel-tabs { gap: 6px; }
-  .channel-tabs a {
+  .channel-tab { flex: 0 0 auto; }
+  .channel-tab__link {
     padding: 5px 10px;
     font-size: 13px;
-    flex: 0 0 auto;
     white-space: nowrap;
   }
 }

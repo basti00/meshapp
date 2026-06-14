@@ -612,10 +612,101 @@
     }
   }
 
+  // ---------- Channel modal ----------
+  function setChannelModalLoading(channelKey) {
+    const titleName = document.getElementById("channel-modal-name");
+    const titleSub = document.getElementById("channel-modal-sub");
+    const body = document.getElementById("channel-modal-body");
+    if (titleName) titleName.textContent = "Loading…";
+    if (titleSub) titleSub.textContent = "";
+    if (body) body.innerHTML = '<p class="muted">Fetching channel details…</p>';
+  }
+
+  // A wider "key" row: the PSK is shown in a selectable monospace block so it
+  // can be read/copied to reproduce the channel in the Meshtastic app.
+  function keyRow(label, value) {
+    if (value === undefined || value === null || value === "") return "";
+    return `<dt>${escapeHtml(label)}</dt>` +
+      `<dd><code class="channel-key">${escapeHtml(String(value))}</code></dd>`;
+  }
+
+  function renderChannelDetail(channel) {
+    const titleName = document.getElementById("channel-modal-name");
+    const titleSub = document.getElementById("channel-modal-sub");
+    const body = document.getElementById("channel-modal-body");
+
+    if (titleName) titleName.textContent = channel.display_name || "Channel";
+    if (titleSub) {
+      const idx = channel.channel_index;
+      titleSub.textContent = idx !== null && idx !== undefined ? `Index ${idx}` : "";
+    }
+
+    if (!channel.configured) {
+      if (body) {
+        body.innerHTML = '<p class="muted">No configuration synced from the device yet. ' +
+          'Channel details appear once the radio is connected.</p>';
+      }
+      return;
+    }
+
+    const yesNo = (v) => (v ? "Enabled" : "Disabled");
+    const identity =
+      row("Name", channel.name || (channel.channel_index === 0 ? "(default / primary)" : null)) +
+      row("Index", channel.channel_index) +
+      row("Role", channel.role) +
+      row("Encryption", channel.key_label) +
+      row("Key size", channel.psk_size !== undefined && channel.psk_size !== null
+        ? `${channel.psk_size} bytes` : null);
+
+    const keys =
+      keyRow("Key (base64)", channel.psk) +
+      keyRow("Key (hex)", channel.psk_hex);
+
+    const options =
+      row("Uplink", yesNo(channel.uplink_enabled)) +
+      row("Downlink", yesNo(channel.downlink_enabled)) +
+      row("Position precision", formatValue(channel.position_precision)) +
+      row("Updated", formatTimeWithRelative(channel.updated_at));
+
+    const sections = [
+      ["Channel", identity],
+      ["Encryption key", keys],
+      ["Options", options],
+    ];
+
+    const html = renderSections(sections) + renderJsonSections(
+      channel.sections,
+      "Raw (from meshtastic localNode.channels)"
+    );
+    if (body) body.innerHTML = html || '<p class="muted">No channel data.</p>';
+  }
+
+  async function showChannelModal(channelKey) {
+    if (channelKey === null || channelKey === undefined || channelKey === "") return;
+    openModal(document.getElementById("channel-modal"));
+    setChannelModalLoading(channelKey);
+    try {
+      const response = await fetch(`/api/channels/${encodeURIComponent(channelKey)}`, { cache: "no-store" });
+      const titleName = document.getElementById("channel-modal-name");
+      const body = document.getElementById("channel-modal-body");
+      if (!response.ok) {
+        if (titleName) titleName.textContent = "Channel";
+        if (body) body.innerHTML = `<p class="muted">Failed to load channel (${response.status}).</p>`;
+        return;
+      }
+      const payload = await response.json();
+      if (payload && payload.channel) renderChannelDetail(payload.channel);
+    } catch (err) {
+      const body = document.getElementById("channel-modal-body");
+      if (body) body.innerHTML = '<p class="muted">Network error loading channel.</p>';
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     const modals = [
       document.getElementById("node-modal"),
       document.getElementById("message-modal"),
+      document.getElementById("channel-modal"),
     ];
     modals.forEach(function (modal) {
       if (!modal) return;
@@ -631,6 +722,12 @@
 
     // Delegated click handling so dynamically-rendered rows work too
     document.addEventListener("click", function (event) {
+      const channelInfo = event.target.closest(".channel-tab__info");
+      if (channelInfo) {
+        event.preventDefault();
+        showChannelModal(channelInfo.dataset.channelKey);
+        return;
+      }
       const nodeRef = event.target.closest(".node-button, .msg-party--link");
       if (nodeRef) {
         const id = nodeRef.dataset.nodeId;
@@ -685,6 +782,7 @@
     batteryInfo,
     showNodeModal,
     showMessageModal,
+    showChannelModal,
     isLive,
     LIVE_THRESHOLD_SECONDS,
   };

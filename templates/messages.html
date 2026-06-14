@@ -9,14 +9,13 @@
     {% if channels %}
       <div class="channel-tabs">
         {% for channel in channels %}
-          {% if channel.channel_key == "unknown" or channel.channel_index == 0 %}
-            {% set channel_label = "Primary" %}
-          {% else %}
-            {% set channel_label = "Channel " ~ (channel.channel_index if channel.channel_index is not none else (channel.channel_key or "?")) %}
-          {% endif %}
-          <a href="{{ url_for('messages_channel', channel_key=channel.channel_key) }}"
-             class="{% if channel.channel_key == current_channel.channel_key %}active{% endif %}"
-             title="Key: {{ channel.channel_key }}">{{ channel_label }}</a>
+          <span class="channel-tab{% if channel.channel_key == current_channel.channel_key %} active{% endif %}">
+            <a href="{{ url_for('messages_channel', channel_key=channel.channel_key) }}"
+               class="channel-tab__link">{{ channel.display_name }}</a>
+            <button type="button" class="channel-tab__info"
+                    data-channel-key="{{ channel.channel_key }}"
+                    aria-label="Channel info" title="Channel info">i</button>
+          </span>
         {% endfor %}
       </div>
     {% endif %}
