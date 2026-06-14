@@ -333,7 +333,6 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(channel_key, thread_root)"
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes(last_seen DESC)")
-        _backfill_threads(conn)
         conn.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
         conn.commit()
 
@@ -405,35 +404,6 @@ def _reconcile_thread_root(conn, channel_key, packet_id, thread_root):
             "UPDATE messages SET thread_root = ? WHERE channel_key = ? AND thread_root = ?",
             (thread_root, channel_key, old_root),
         )
-
-
-def _backfill_threads(conn):
-    """One-time migration: populate reply_id/thread_root for legacy rows.
-
-    Processes oldest-first so a parent is normally rooted before its replies,
-    then reconciles to catch any reply that predates its parent. Runs only
-    while rows still lack a thread_root, so it is a no-op once migrated.
-    """
-    rows = conn.execute(
-        "SELECT id, channel_key, packet_id, raw_json FROM messages "
-        "WHERE thread_root IS NULL ORDER BY rx_time, id"
-    ).fetchall()
-    for row in rows:
-        raw = _safe_json_loads(row["raw_json"])
-        decoded = raw.get("decoded") if isinstance(raw, dict) else None
-        reply_id = None
-        if isinstance(decoded, dict):
-            reply_id = _coerce_int(decoded.get("replyId") or decoded.get("reply_id"))
-        packet_id = row["packet_id"]
-        if packet_id is None and isinstance(raw, dict):
-            packet_id = _coerce_int(raw.get("id"))
-        thread_root = _resolve_thread_root(conn, row["channel_key"], packet_id, reply_id)
-        conn.execute(
-            "UPDATE messages SET reply_id = ?, thread_root = ?, "
-            "packet_id = COALESCE(packet_id, ?) WHERE id = ?",
-            (reply_id, thread_root, packet_id, row["id"]),
-        )
-        _reconcile_thread_root(conn, row["channel_key"], packet_id, thread_root)
 
 
 def _insert_message(**message):
