@@ -524,12 +524,14 @@
     const raw = message.raw || {};
 
     let channelLabel;
-    if (message.channel_index !== null && message.channel_index !== undefined) {
+    if (message.channel_index === 0 || message.channel_key === "unknown") {
+      channelLabel = "Primary";
+    } else if (message.channel_index !== null && message.channel_index !== undefined) {
       channelLabel = `Channel ${message.channel_index}`;
-    } else if (message.channel_key && message.channel_key !== "unknown") {
+    } else if (message.channel_key) {
       channelLabel = `Key ${message.channel_key}`;
     } else {
-      channelLabel = "Unknown channel";
+      channelLabel = "Primary";
     }
 
     const recipient = recipientParty(message);
