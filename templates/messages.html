@@ -9,12 +9,15 @@
     {% if channels %}
       <div class="channel-tabs">
         {% for channel in channels %}
-          <span class="channel-tab{% if channel.channel_key == current_channel.channel_key %} active{% endif %}">
+          {% set is_active = channel.channel_key == current_channel.channel_key %}
+          <span class="channel-tab{% if is_active %} active{% endif %}">
             <a href="{{ url_for('messages_channel', channel_key=channel.channel_key) }}"
                class="channel-tab__link">{{ channel.display_name }}</a>
-            <button type="button" class="channel-tab__info"
-                    data-channel-key="{{ channel.channel_key }}"
-                    aria-label="Channel info" title="Channel info">i</button>
+            {% if is_active %}
+              <button type="button" class="channel-tab__info"
+                      data-channel-key="{{ channel.channel_key }}"
+                      aria-label="Channel info" title="Channel info">i</button>
+            {% endif %}
           </span>
         {% endfor %}
       </div>
