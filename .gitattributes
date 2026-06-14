@@ -1,0 +1,1 @@
+meshapp_backup_*.db filter=lfs diff=lfs merge=lfs -text
