@@ -278,100 +278,18 @@ NODE_COLUMNS = [
     ("raw_node_json", "TEXT"),
 ]
 
-# Blob columns from earlier schemas, superseded by raw_node_json. Dropped in
-# place where SQLite supports DROP COLUMN (>= 3.35); otherwise left dormant.
-# Their data is reconstructed from the live device on the next packet.
-NODE_DROP_COLUMNS = [
-    "telemetry_json", "position_json",          # schema <= 7
-    "raw_user_json", "raw_telemetry_json", "raw_position_json",  # schema 8
-]
-
-# Columns added to the messages table after its original schema; kept here so
-# existing databases get migrated via _ensure_columns().
-#   packet_id   - the mesh packet id (mirrors raw_json.id)
-#   reply_id    - the packet id this message replies to (mirrors decoded.replyId)
-#   thread_root - packet id of the root of this message's reply chain; every
-#                 message in one conversation tree shares it, which is what
-#                 lets us paginate by whole tree (see _load_channel_threads).
-#   emoji       - the tapback reaction emoji, or NULL for a normal message;
-#                 promoted to a column so list reads never parse JSON.
-# The full packet lives verbatim in raw_json (which contains `decoded`), so the
-# old decoded_json column is redundant and no longer written.
-MESSAGE_COLUMNS = [
-    ("packet_id", "INTEGER"),
-    ("reply_id", "INTEGER"),
-    ("thread_root", "INTEGER"),
-    ("emoji", "TEXT"),
-]
-
 # Fields that, once set, must not be overwritten by later upserts.
 PRESERVE_IF_EXISTS = {"first_seen"}
-
-
-def _table_columns(conn, table):
-    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-
-
-def _ensure_columns(conn, table, columns):
-    existing = _table_columns(conn, table)
-    for name, decl in columns:
-        if name not in existing:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
-
-
-def _drop_columns(conn, table, columns):
-    """Drop ``columns`` from ``table`` if present. Uses ALTER TABLE DROP COLUMN
-    (SQLite >= 3.35); on older engines the column is left in place, dormant and
-    no longer written."""
-    existing = _table_columns(conn, table)
-    for name in columns:
-        if name in existing:
-            try:
-                conn.execute(f"ALTER TABLE {table} DROP COLUMN {name}")
-            except sqlite3.OperationalError:
-                pass
-
-
-def _backfill_message_emoji(conn):
-    """Populate the new emoji column for legacy rows from their stored JSON.
-
-    Reads the tapback emoji out of raw_json.decoded (older rows may instead
-    have a standalone decoded_json column). Runs only while emoji is NULL, so
-    it is a no-op once migrated."""
-    existing = _table_columns(conn, "messages")
-    sources = ["raw_json"]
-    if "decoded_json" in existing:
-        sources.append("decoded_json")
-    rows = conn.execute(
-        f"SELECT id, {', '.join(sources)} FROM messages WHERE emoji IS NULL"
-    ).fetchall()
-    for row in rows:
-        emoji = None
-        for source in sources:
-            blob = _safe_json_loads(row[source])
-            if isinstance(blob, dict):
-                # raw_json nests the payload under "decoded"; decoded_json is it.
-                decoded = blob.get("decoded") if "decoded" in blob else blob
-                if isinstance(decoded, dict) and decoded.get("emoji"):
-                    emoji = _coerce_str(decoded.get("emoji"))
-                    break
-        if emoji is not None:
-            conn.execute("UPDATE messages SET emoji = ? WHERE id = ?", (emoji, row["id"]))
-
-    # The full packet lives in raw_json (which contains `decoded`), so the old
-    # standalone column is redundant. Drop it where SQLite supports DROP COLUMN
-    # (>= 3.35); on older engines it stays as a harmless, no-longer-written column.
-    if "decoded_json" in existing:
-        try:
-            conn.execute("ALTER TABLE messages DROP COLUMN decoded_json")
-        except sqlite3.OperationalError:
-            pass
 
 
 def init_db():
     with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
+        # raw_json holds the verbatim packet (it contains `decoded`). reply_id /
+        # thread_root drive whole-tree pagination (see _load_channel_threads);
+        # emoji is the tapback reaction (NULL for a normal message), promoted to
+        # a column so list reads never parse JSON.
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS messages (
@@ -387,6 +305,9 @@ def init_db():
                 rx_rssi REAL,
                 rx_snr REAL,
                 packet_id INTEGER,
+                reply_id INTEGER,
+                thread_root INTEGER,
+                emoji TEXT,
                 raw_json TEXT
             )
             """
@@ -402,10 +323,6 @@ def init_db():
             )
             """
         )
-        _ensure_columns(conn, "nodes", NODE_COLUMNS)
-        _ensure_columns(conn, "messages", MESSAGE_COLUMNS)
-        _drop_columns(conn, "nodes", NODE_DROP_COLUMNS)
-        _backfill_message_emoji(conn)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_channel_key_time ON messages(channel_key, rx_time DESC)"
         )
