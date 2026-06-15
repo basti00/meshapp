@@ -653,21 +653,21 @@
 
     // The four fields needed to reproduce this channel on a handheld, each in
     // its own copyable block. Index is intentionally omitted -- it's in the title.
+    // Key size is reported in bits, except the 1-byte default-key sentinel which
+    // is shown verbatim (a quirky preexisting convention).
     const sizeText = (channel.psk_size === null || channel.psk_size === undefined)
       ? null
-      : (channel.key_label
-          ? `${channel.psk_size} byte${channel.psk_size === 1 ? "" : "s"} · ${channel.key_label}`
-          : `${channel.psk_size} bytes`);
+      : (channel.psk_size === 1 ? "1 byte" : `${channel.psk_size * 8} bits`);
     const nameValue = channel.name
       || (channel.channel_index === 0 ? "(primary — no custom name)" : null);
     const setup =
       keyRow("Name", nameValue) +
       keyRow("Key size", sizeText) +
-      keyRow("Key (hex)", channel.psk_hex) +
+      keyRow("Key (base64)", channel.psk) +
       keyRow("Role", channel.role);
 
     const other =
-      keyRow("Key (base64)", channel.psk) +
+      keyRow("Key (hex)", channel.psk_hex) +
       row("Uplink", yesNo(channel.uplink_enabled)) +
       row("Downlink", yesNo(channel.downlink_enabled)) +
       row("Position precision", formatValue(channel.position_precision)) +
