@@ -58,7 +58,11 @@
                     date.getDate() === now.getDate();
     const hm = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
     if (sameDay) return hm;
-    return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()} ${hm}`;
+    const dm = `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.`;
+    // Drop the year for this-year messages to keep the header line compact;
+    // only older messages carry the full year.
+    if (date.getFullYear() === now.getFullYear()) return `${dm} ${hm}`;
+    return `${dm}${date.getFullYear()} ${hm}`;
   }
 
   function formatRelative(epochSeconds) {

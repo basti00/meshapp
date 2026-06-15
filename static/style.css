@@ -520,14 +520,45 @@ body:has(.messages-page) main {
   outline-offset: 2px;
 }
 
+/* A message is an avatar gutter + the bubble box. The avatar lives outside
+   the box so it can straddle the panel edge and span the bubble's height. */
+.msg-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.msg-row__avatar {
+  flex: 0 0 auto;
+  padding: 0;
+  /* Nudge down so the avatar sits ~centred against a one-line bubble instead
+     of hugging the top edge. */
+  margin: 6px 0 0;
+  border-radius: 50%;
+}
+
+.msg-row__avatar:hover { background: none; }
+
+.msg-row__avatar .avatar {
+  width: 42px;
+  height: 42px;
+  font-size: 16px;
+}
+
+.msg-row__avatar .avatar--small { font-size: 12px; }
+
+.msg-row .bubble { flex: 1 1 auto; min-width: 0; }
+
 .bubble {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 12px 14px;
+  padding: 8px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 3px;
   box-shadow: var(--shadow);
 }
 
@@ -546,7 +577,45 @@ body:has(.messages-page) main {
   outline-offset: 2px;
 }
 
-.bubble__header { display: flex; }
+/* Header: name | (meta + time). Grid tracks give the right group a real,
+   shrinkable width so the meta can clip while the time stays pinned. */
+.bubble__header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* Name button: strip the node-button box so the name sits flush on its row.
+   Coloured + bold so it reads as a label, clearly apart from the body text.
+   Never shrinks -- the name is always shown in full. */
+.bubble__name {
+  padding: 0;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.bubble__name:hover { background: none; text-decoration: underline; }
+
+.bubble__name .node-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.01em;
+}
+
+/* Right group: meta column (shrinks/clips) + timestamp column (pinned). When
+   the row is too narrow the meta clips from its left ("2 hops" goes before
+   "SNR"), so the timestamp stays visible as long as possible. */
+.bubble__info {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
 
 .bubble__body {
   font-size: 15px;
@@ -558,21 +627,18 @@ body:has(.messages-page) main {
 
 .bubble__body--meta { font-size: 13px; }
 
-.bubble__footer {
+/* Items pack to the right; overflow spills off the left edge and is clipped. */
+.bubble__meta {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  color: var(--muted);
+  flex: 0 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
-.bubble__meta {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
+.bubble__meta span { flex: 0 0 auto; }
 
 .bubble__meta span + span::before {
   content: "·";
@@ -581,6 +647,7 @@ body:has(.messages-page) main {
 }
 
 .bubble__time {
+  flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -657,6 +724,9 @@ body:has(.messages-page) main {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  /* Without this, a non-wrapping body (e.g. a long URL) stretches the column
+     wider than the viewport, pushing every row's timestamp off-screen. */
+  min-width: 0;
 }
 
 /* Each reply depth indents and gains a connecting rail. */
@@ -672,6 +742,12 @@ body:has(.messages-page) main {
   box-shadow: none;
   opacity: 0.75;
   font-style: italic;
+  /* No avatar gutter of its own -- indent to line up with real bubbles. */
+  margin-left: 52px;
+}
+
+@media (max-width: 720px) {
+  .bubble--placeholder { margin-left: 44px; }
 }
 
 /* ---------- Modal ---------- */
@@ -1030,15 +1106,17 @@ button.msg-quote:hover .msg-quote__go { color: var(--accent); }
 
   /* Scale message bubbles and text ~10% smaller to fit more on screen. */
   .messages-page h1 { font-size: clamp(17px, 5vw, 20px); }
-  .message-list { gap: 8px; padding: 4px 4px calc(6px + env(safe-area-inset-bottom)); }
-  .bubble { padding: 10px 12px; gap: 7px; border-radius: 12px; }
+  .message-list { gap: 6px; padding: 4px 4px calc(6px + env(safe-area-inset-bottom)); }
+  .msg-row { gap: 8px; }
+  .bubble { padding: 7px 10px; gap: 2px; border-radius: 12px; }
   .bubble__body { font-size: 13.5px; }
   .bubble__body--meta { font-size: 12px; }
-  .bubble__footer { font-size: 11px; }
+  .bubble__info { font-size: 11px; }
+  .bubble__name .node-name { font-size: 12px; }
   .bubble__body--tapback { font-size: 12.5px; }
   .bubble__emoji { font-size: 16px; }
-  .bubble .avatar { width: 28px; height: 28px; font-size: 12px; }
-  .bubble .avatar--small { font-size: 9px; }
+  .msg-row__avatar .avatar { width: 36px; height: 36px; font-size: 14px; }
+  .msg-row__avatar .avatar--small { font-size: 10px; }
   .bubble .node-button__sub { font-size: 10px; }
   .msg-quote__text { font-size: 12px; }
   .msg-quote__label { font-size: 10px; }

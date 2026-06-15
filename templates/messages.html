@@ -53,7 +53,7 @@
     const refreshSeconds = {{ auto_refresh_seconds or 0 }};
     const channelKey = {{ current_channel.channel_key | tojson }};
     const list = document.getElementById("messages-list");
-    const { formatMessageTime, formatValue, escapeHtml, renderNodeButton, renderAvatar } = window.MeshApp;
+    const { formatMessageTime, formatValue, escapeHtml, renderAvatar } = window.MeshApp;
 
     let messages = [];
     try {
@@ -111,25 +111,36 @@
         : `<div class="bubble__body bubble__body--meta"><span class="tag">${escapeHtml(msg.portnum || "unknown")}</span></div>`;
     }
 
-    // Builds the standard message bubble.
+    // Builds the standard message bubble. The avatar sits in a left column;
+    // the name+time row, text and signal meta stack to its right (compact
+    // chat layout that drops the avatar-tall header overhang).
     function buildBubble(msg) {
-      const nodeBtn = renderNodeButton({
-        node_id: msg.from_id,
+      const messageId = msg.id !== null && msg.id !== undefined ? msg.id : "";
+      const name = msg.long_name || msg.short_name || msg.from_id || "-";
+      const nodeId = msg.from_id ? ` data-node-id="${escapeHtml(msg.from_id)}"` : "";
+      const avatar = renderAvatar({
         short_name: msg.short_name,
         long_name: msg.long_name,
+        node_id: msg.from_id,
         avatar_bg: msg.avatar_bg,
         avatar_fg: msg.avatar_fg,
       });
-      const messageId = msg.id !== null && msg.id !== undefined ? msg.id : "";
+      const meta = renderMeta(msg);
+      const metaHtml = meta ? `<span class="bubble__meta">${meta}</span>` : "";
       return `
-        <article class="bubble bubble--clickable" data-message-id="${escapeHtml(messageId)}" tabindex="0" role="button" aria-label="View message details">
-          <header class="bubble__header">${nodeBtn}</header>
-          ${bubbleBody(msg)}
-          <footer class="bubble__footer">
-            <span class="bubble__meta">${renderMeta(msg)}</span>
-            <time class="bubble__time" datetime="${escapeHtml(msg.rx_time || '')}">${escapeHtml(formatMessageTime(msg.rx_time))}</time>
-          </footer>
-        </article>`;
+        <div class="msg-row">
+          <button type="button" class="node-button msg-row__avatar"${nodeId} aria-label="${escapeHtml(name)}">${avatar}</button>
+          <article class="bubble bubble--clickable" data-message-id="${escapeHtml(messageId)}" tabindex="0" role="button" aria-label="View message details">
+            <header class="bubble__header">
+              <button type="button" class="node-button bubble__name"${nodeId}><span class="node-name">${escapeHtml(name)}</span></button>
+              <span class="bubble__info">
+                ${metaHtml}
+                <time class="bubble__time" datetime="${escapeHtml(msg.rx_time || '')}">${escapeHtml(formatMessageTime(msg.rx_time))}</time>
+              </span>
+            </header>
+            ${bubbleBody(msg)}
+          </article>
+        </div>`;
     }
 
     // Maps mesh packet id -> message, so replies can find their parent.
