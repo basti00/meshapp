@@ -535,7 +535,7 @@ body:has(.messages-page) main {
   padding: 0;
   /* Nudge down so the avatar sits ~centred against a one-line bubble instead
      of hugging the top edge. */
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   border-radius: 50%;
 }
 
