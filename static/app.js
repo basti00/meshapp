@@ -653,11 +653,17 @@
 
     // The four fields needed to reproduce this channel on a handheld, each in
     // its own copyable block. Index is intentionally omitted -- it's in the title.
-    // Key size is reported in bits, except the 1-byte default-key sentinel which
-    // is shown verbatim (a quirky preexisting convention).
-    const sizeText = (channel.psk_size === null || channel.psk_size === undefined)
-      ? null
-      : (channel.psk_size === 1 ? "1 byte" : `${channel.psk_size * 8} bits`);
+    // Key size is reported in bits, with two quirky exceptions: the default
+    // key (1 byte == "AQ==") shows "Standard", and any other 1-byte sentinel is
+    // shown verbatim as "1 byte" (preexisting conventions).
+    let sizeText;
+    if (channel.psk_size === null || channel.psk_size === undefined) {
+      sizeText = null;
+    } else if (channel.psk_size === 1) {
+      sizeText = channel.psk === "AQ==" ? "Standard" : "1 byte";
+    } else {
+      sizeText = `${channel.psk_size * 8} bits`;
+    }
     const nameValue = channel.name
       || (channel.channel_index === 0 ? "(primary — no custom name)" : null);
     const setup =
