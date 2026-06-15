@@ -907,6 +907,19 @@ body:has(.messages-page) main {
   color: var(--accent);
 }
 
+/* Relay candidates: several capsules joined by "or" (1 relay byte = many ids). */
+.msg-relay {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.msg-relay__or {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .msg-quote {
   display: flex;
   align-items: stretch;

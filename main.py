@@ -1279,6 +1279,39 @@ def message_detail_api(message_id):
                 to_node.update(_node_avatar_colors(to_node.get("node_id")))
         message["to_node"] = to_node
 
+        # Relay node: only the last byte of the relaying node's id travels on
+        # the wire (1 byte = 256 possibilities), so it can't be resolved
+        # uniquely. Surface every known node whose id ends in that byte; the UI
+        # shows them as "x or y or z". Most-recently-seen nodes come first as
+        # the more likely relay.
+        relay_byte = _coerce_int(raw.get("relayNode") if isinstance(raw, dict) else None)
+        relay_candidates = []
+        if relay_byte is not None and 0 <= relay_byte <= 0xFF:
+            suffix = f"{relay_byte:02x}"
+            matches = conn.execute(
+                """
+                SELECT node_id, short_name, long_name
+                FROM nodes
+                WHERE lower(substr(node_id, -2)) = ?
+                ORDER BY last_seen DESC
+                """,
+                (suffix,),
+            ).fetchall()
+            for match in matches:
+                cand = dict(match)
+                cand.update(_node_avatar_colors(cand.get("node_id")))
+                relay_candidates.append(cand)
+            # A 0-hop packet reached us directly from its origin with no relay
+            # in between, so the relay must be the sender. When the sender is
+            # among the byte matches, drop the other (impossible) candidates.
+            if _coerce_int(message.get("hops")) == 0:
+                from_id = message.get("from_id")
+                sender_only = [c for c in relay_candidates if c.get("node_id") == from_id]
+                if sender_only:
+                    relay_candidates = sender_only
+        message["relay_node"] = relay_byte
+        message["relay_candidates"] = relay_candidates
+
     message.update(_node_avatar_colors(message.get("from_id")))
     # Combined sections, assembled on demand for the expand-for-JSON view.
     message["sections"] = {

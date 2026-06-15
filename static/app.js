@@ -248,6 +248,12 @@
     return `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd>`;
   }
 
+  // Like row(), but the value is trusted HTML (e.g. capsules) rather than text.
+  function rowHtml(label, html) {
+    if (!html) return "";
+    return `<dt>${escapeHtml(label)}</dt><dd>${html}</dd>`;
+  }
+
   function renderSections(sections) {
     return sections
       .filter(([_, content]) => content && content.trim().length)
@@ -477,6 +483,28 @@
     return null;
   }
 
+  function relayParty(node) {
+    return {
+      node_id: node.node_id || null,
+      name: node.long_name || node.short_name || node.node_id || "Unknown node",
+      avatarText: avatarTextFor(node.short_name, node.long_name, node.node_id),
+      avatar_bg: node.avatar_bg,
+      avatar_fg: node.avatar_fg,
+    };
+  }
+
+  // The relay field on the wire is a single byte (last byte of the relaying
+  // node's id), so it can map to several known nodes. Render each as a
+  // clickable capsule joined with "or"; returns "" when nothing resolves.
+  function renderRelayCapsules(message) {
+    const candidates = message.relay_candidates || [];
+    if (!candidates.length) return "";
+    const caps = candidates.map((n) => renderMsgParty(relayParty(n)));
+    return `<div class="msg-relay">` +
+      caps.join(`<span class="msg-relay__or">or</span>`) +
+      `</div>`;
+  }
+
   function renderReplyQuote(message) {
     if (message.reply_id === null || message.reply_id === undefined) return "";
     const parent = message.reply_to;
@@ -564,6 +592,7 @@
       row("Hop start", formatValue(raw.hopStart)) +
       row("Hop limit", formatValue(raw.hopLimit)) +
       row("Relay node", formatValue(raw.relayNode)) +
+      rowHtml("Relayed by", renderRelayCapsules(message)) +
       row("Transport", raw.transportMechanism) +
       row("Priority", raw.priority);
 
