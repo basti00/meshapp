@@ -12,11 +12,7 @@ Meshapp listens to a Meshtastic radio over serial, stores every packet in SQLite
 * There are no tests and no linter configured.
 * DB backup/restore: `python db_backup.py` (safe while app runs), `python db_restore.py <file_or_dir>` (refuses if `meshapp.db` exists). Backups are tracked with Git LFS.
 * Diagnostic scripts (need the serial device, so run on the Pi): `dump_nodes.py`, `dump_messages.py`, `dump_channels.py` print raw Meshtastic data to help understand packet shapes. Sample output is checked in as `dump_nodes.log` / `dump_messages.log`.
-
-## Production Pi
-
-* `ssh user@pizero.tailb42140.ts.net` — permission granted to enter password `4142` via stdin. Repo lives at `~/meshapp` on the Pi (same layout as local).
-* A copy of the prod database is at `meshapp.db` locally for reference; it may be out of date.
+* A copy of the prod database is at `meshapp.db` locally for reference.
 
 ## Architecture
 
@@ -33,4 +29,4 @@ Everything server-side is in `main.py` (single file, ~1500 lines):
 ## Conventions
 
 * Commit every change separately as its own git commit, after verifying it works on both desktop and mobile layouts.
-* When exiting, suggest a commit message for the changes you made, 10–20 words max.
+
