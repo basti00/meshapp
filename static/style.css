@@ -663,16 +663,20 @@ body:has(.messages-page) main {
 }
 
 /* ---------- Tapback capsules ---------- */
-/* Reactions render as small capsules under the message they react to. They
-   wrap onto a new row once they overflow the available width. The negative
-   top margin snugs the row up against its parent bubble despite the list gap. */
+/* Reactions render as small capsules overlapping the bottom edge of the
+   message they react to. They wrap onto a new row once they overflow the
+   available width. The negative top margin cancels the list gap and pulls
+   the row up over the parent bubble. */
 .tapback-row {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
-  margin-top: -4px;
+  margin-top: -22px;
   padding-left: 16px;
+  padding-right: 12px;
+  position: relative;
+  z-index: 1;
 }
 
 .tapback {
