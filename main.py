@@ -12,7 +12,7 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 from meshtastic.serial_interface import SerialInterface
 from pubsub import pub
 
-DB_SCHEMA_VERSION = 10
+DB_SCHEMA_VERSION = 11
 DB_PATH = Path(__file__).with_name("meshapp.db")
 DEVICE_PATH = os.environ.get("MESH_DEVICE", "/dev/ttyACM0")
 DEFAULT_CHANNEL_INDEX = int(os.environ.get("MESH_CHANNEL", "0"))
@@ -353,8 +353,42 @@ def init_db():
             )
             """
         )
+        # Every received non-message frame, verbatim, one row per packet.
+        # Messages stay in their own table; keeping frames separate means old
+        # telemetry/position spam can be FIFO-pruned later without touching
+        # chat history. payload_json is the decoded typed sub-payload
+        # (telemetry/position/user dict) so queries can json_extract() it
+        # without re-parsing the whole packet.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS frames (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rx_time INTEGER NOT NULL,
+                node_id TEXT,
+                frame_type TEXT,
+                portnum TEXT,
+                channel_index INTEGER,
+                channel_key TEXT,
+                hops INTEGER,
+                rx_rssi REAL,
+                rx_snr REAL,
+                packet_id INTEGER,
+                payload_json TEXT,
+                raw_json TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_frames_node_time ON frames(node_id, rx_time DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_frames_node_type_time ON frames(node_id, frame_type, rx_time DESC)"
+        )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_channel_key_time ON messages(channel_key, rx_time DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_from_time ON messages(from_id, rx_time DESC)"
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_packet_id ON messages(packet_id)"
@@ -552,6 +586,15 @@ def _insert_message(**message):
         sql = f"INSERT INTO messages ({', '.join(columns)}) VALUES ({placeholders})"
         conn.execute(sql, list(message.values()))
         _reconcile_thread_root(conn, channel_key, packet_id, message["thread_root"])
+        conn.commit()
+
+
+def _insert_frame(**frame):
+    columns = list(frame.keys())
+    placeholders = ", ".join(["?"] * len(columns))
+    sql = f"INSERT INTO frames ({', '.join(columns)}) VALUES ({placeholders})"
+    with _db_connect() as conn:
+        conn.execute(sql, list(frame.values()))
         conn.commit()
 
 
@@ -884,6 +927,32 @@ def handle_packet(packet, interface=None):
             packet_id=_coerce_int(packet.get("id")),
             reply_id=reply_id,
             emoji=emoji,
+            raw_json=_json_dumps(packet),
+        )
+
+    if non_message_type and from_id:
+        # Archive the whole frame so node details can always point at the
+        # exact packet a value came from (columns only keep the latest).
+        if telemetry:
+            payload = telemetry
+        elif position:
+            payload = position
+        else:
+            payload = decoded.get("user") or decoded.get("nodeInfo") or decoded.get("nodeinfo")
+            if not isinstance(payload, dict):
+                payload = None
+        _insert_frame(
+            rx_time=rx_time,
+            node_id=from_id,
+            frame_type=non_message_type,
+            portnum=str(portnum) if portnum else None,
+            channel_index=channel_index,
+            channel_key=channel_key,
+            hops=hops,
+            rx_rssi=packet.get("rxRssi"),
+            rx_snr=packet.get("rxSnr"),
+            packet_id=_coerce_int(packet.get("id")),
+            payload_json=_json_dumps(payload) if payload is not None else None,
             raw_json=_json_dumps(packet),
         )
 
