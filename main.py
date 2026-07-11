@@ -1064,7 +1064,11 @@ def _parse_cursor(value):
 
 def _select_thread_page(conn, channel_key, before, limit):
     """Pick the newest ``limit`` thread roots, ordered by recency (newest
-    first). ``before`` is a ``(recency, root)`` keyset cursor for older pages."""
+    first). ``before`` is a ``(recency, root)`` keyset cursor for older pages.
+
+    Recency counts normal messages only -- a tapback doesn't pull its tree
+    forward. Trees made up solely of tapbacks (reactions to a message that
+    isn't in stored history) fall back to the reaction times."""
     params = [channel_key]
     having = ""
     if before is not None:
@@ -1074,8 +1078,10 @@ def _select_thread_page(conn, channel_key, before, limit):
     params.append(limit)
     return conn.execute(
         f"""
-        SELECT root, MAX(rx_time) AS recency FROM (
-            SELECT COALESCE(thread_root, -id) AS root, rx_time
+        SELECT root, COALESCE(
+            MAX(CASE WHEN emoji IS NULL THEN rx_time END), MAX(rx_time)
+        ) AS recency FROM (
+            SELECT COALESCE(thread_root, -id) AS root, rx_time, emoji
             FROM messages WHERE channel_key = ?
         ) GROUP BY root
         {having}

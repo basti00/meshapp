@@ -213,6 +213,8 @@
           `</div></article>`;
       },
       // Subtree recency = newest rx_time among the node and its descendants.
+      // Tapbacks don't count -- a reaction must not re-sort the tree -- except
+      // as a fallback for tapback-only trees (reactions on a placeholder).
       // The _visiting flag keeps pathological reply cycles from looping.
       recency: function (node) {
         if (node._rec !== undefined) return node._rec;
@@ -222,8 +224,10 @@
         let r = own;
         const self = this;
         node.children.forEach(function (c) { r = Math.max(r, self.recency(c)); });
-        (node.tapbacks || []).forEach(function (t) { r = Math.max(r, Number(t.rx_time) || 0); });
         node._visiting = false;
+        if (!r) {
+          (node.tapbacks || []).forEach(function (t) { r = Math.max(r, Number(t.rx_time) || 0); });
+        }
         node._rec = r;
         return r;
       },
@@ -407,8 +411,9 @@
     }
 
     // Live updates: pull whole trees touched since our newest message. New
-    // rows bump their tree's recency, so re-rendering re-sorts them to the
-    // bottom -- pulling an old tree forward if it just got a reply.
+    // replies bump their tree's recency, so re-rendering re-sorts them to the
+    // bottom -- pulling an old tree forward if it just got a reply. Tapbacks
+    // still arrive and render, but don't re-sort the tree.
     async function refresh() {
       if (channelKey === null || channelKey === undefined) return;
       try {
