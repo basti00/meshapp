@@ -526,6 +526,15 @@ def _channel_display_name(channel_index, name):
     return "Channel ?"
 
 
+def _channel_label_for_key(channel_key, config=None):
+    """Human display name for a message/frame channel_key ("Primary", name, ...)."""
+    index = _channel_key_to_index(channel_key)
+    name = None
+    if config and index is not None and index in config:
+        name = config[index].get("name")
+    return _channel_display_name(index, name)
+
+
 def _resolve_thread_root(conn, channel_key, packet_id, reply_id):
     """Pick the thread_root for a message.
 
@@ -843,6 +852,33 @@ def _extract_position(decoded):
     if isinstance(position, dict):
         return position
     return None
+
+
+def _position_values(position):
+    """Normalise a decoded position payload into display fields (integer
+    latitudeI/longitudeI fall back to degrees when the float form is absent)."""
+    if not isinstance(position, dict):
+        return {}
+
+    def _degrees(float_key, int_keys):
+        value = position.get(float_key)
+        if value is not None:
+            return value
+        for key in int_keys:
+            scaled = _coerce_int(position.get(key))
+            if scaled is not None:
+                return scaled * 1e-7
+        return None
+
+    return {
+        "latitude": _degrees("latitude", ("latitudeI", "latitude_i")),
+        "longitude": _degrees("longitude", ("longitudeI", "longitude_i")),
+        "altitude": position.get("altitude"),
+        "sats_in_view": position.get("satsInView") or position.get("sats_in_view"),
+        "precision_bits": position.get("precisionBits") or position.get("precision_bits"),
+        "location_source": position.get("locationSource") or position.get("location_source"),
+        "fix_time": position.get("time") or position.get("fixTime"),
+    }
 
 
 def _classify_non_message(message_text, portnum, telemetry, position, nodeinfo):
@@ -1469,6 +1505,78 @@ _NODE_DERIVED_KEYS = (
 )
 
 
+_DEVICE_METRIC_KEYS = (
+    "battery_level", "battery_voltage", "channel_utilization",
+    "air_util_tx", "uptime_seconds",
+)
+_ENVIRONMENT_METRIC_KEYS = ("temperature", "humidity", "pressure")
+
+
+def _latest_frame_row(conn, node_id, extra_sql, params=()):
+    return conn.execute(
+        f"""
+        SELECT id, rx_time, payload_json FROM frames
+        WHERE node_id = ? AND {extra_sql}
+        ORDER BY rx_time DESC, id DESC LIMIT 1
+        """,
+        (node_id, *params),
+    ).fetchone()
+
+
+def _latest_frame_blocks(node_id):
+    """Materialise the newest stored frame of each kind into the value blocks
+    the node modal shows. Each block carries the source frame's id and rx_time
+    so the UI can label values with their age and open the exact frame.
+
+    Device and environment metrics ride in separate TELEMETRY frames, so each
+    gets its own "latest" lookup (a device-metrics frame must not reset the
+    age of the environment readings, and vice versa)."""
+    blocks = {}
+    with _db_connect() as conn:
+        row = _latest_frame_row(conn, node_id, "frame_type = 'nodeinfo'")
+        if row is not None:
+            user = _safe_json_loads(row["payload_json"]) or {}
+            blocks["nodeinfo"] = {
+                "frame_id": row["id"],
+                "rx_time": row["rx_time"],
+                "values": _extract_nodeinfo({"user": user}),
+            }
+        row = _latest_frame_row(
+            conn, node_id,
+            "frame_type = 'telemetry' AND ("
+            "json_extract(payload_json, '$.deviceMetrics') IS NOT NULL "
+            "OR json_extract(payload_json, '$.device_metrics') IS NOT NULL)",
+        )
+        if row is not None:
+            values = _extract_sensor_values(_safe_json_loads(row["payload_json"]))
+            blocks["device"] = {
+                "frame_id": row["id"],
+                "rx_time": row["rx_time"],
+                "values": {k: values.get(k) for k in _DEVICE_METRIC_KEYS},
+            }
+        row = _latest_frame_row(
+            conn, node_id,
+            "frame_type = 'telemetry' AND ("
+            "json_extract(payload_json, '$.environmentMetrics') IS NOT NULL "
+            "OR json_extract(payload_json, '$.environment_metrics') IS NOT NULL)",
+        )
+        if row is not None:
+            values = _extract_sensor_values(_safe_json_loads(row["payload_json"]))
+            blocks["environment"] = {
+                "frame_id": row["id"],
+                "rx_time": row["rx_time"],
+                "values": {k: values.get(k) for k in _ENVIRONMENT_METRIC_KEYS},
+            }
+        row = _latest_frame_row(conn, node_id, "frame_type = 'position'")
+        if row is not None:
+            blocks["position"] = {
+                "frame_id": row["id"],
+                "rx_time": row["rx_time"],
+                "values": _position_values(_safe_json_loads(row["payload_json"])),
+            }
+    return blocks
+
+
 @app.route("/api/nodes/<path:node_id>")
 def node_detail_api(node_id):
     with _db_connect() as conn:
@@ -1487,11 +1595,133 @@ def node_detail_api(node_id):
     if isinstance(raw, dict):
         node["position"] = raw.get("position")
 
+    # Per-frame-type blocks from the frames archive. Nodes that predate the
+    # frames table have none; the UI then falls back to the node columns
+    # (aged by the last_* timestamps) without a frame to click through to.
+    node["latest"] = _latest_frame_blocks(node_id)
+
     node["sections"] = {
         "raw": raw,
         "derived": _pick(node, _NODE_DERIVED_KEYS),
     }
     return jsonify({"node": node})
+
+
+# Rows per page for the node modal's lazy message/frame lists.
+NODE_LIST_PAGE_SIZE = 30
+
+
+def _keyset_page(rows, limit):
+    """next_cursor for a ``rx_time DESC, id DESC`` keyset page ("<rx_time>:<id>"),
+    or None once the page comes up short (start of history)."""
+    if len(rows) < limit:
+        return None
+    last = rows[-1]
+    return f"{last['rx_time']}:{last['id']}"
+
+
+def _keyset_where(before):
+    if before is None:
+        return "", []
+    rx_time, row_id = before
+    return " AND (rx_time < ? OR (rx_time = ? AND id < ?))", [rx_time, rx_time, row_id]
+
+
+@app.route("/api/nodes/<path:node_id>/messages")
+def node_messages_api(node_id):
+    before = _parse_cursor(request.args.get("before"))
+    where_sql, where_params = _keyset_where(before)
+    with _db_connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, rx_time, text, emoji, portnum, channel_index, channel_key
+            FROM messages
+            WHERE from_id = ?{where_sql}
+            ORDER BY rx_time DESC, id DESC
+            LIMIT ?
+            """,
+            (node_id, *where_params, NODE_LIST_PAGE_SIZE),
+        ).fetchall()
+    config = _get_channels_config()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["is_tapback"] = bool(item.get("emoji"))
+        item["channel_label"] = _channel_label_for_key(item.get("channel_key"), config)
+        items.append(item)
+    return jsonify({"messages": items, "next_cursor": _keyset_page(rows, NODE_LIST_PAGE_SIZE)})
+
+
+@app.route("/api/nodes/<path:node_id>/frames")
+def node_frames_api(node_id):
+    before = _parse_cursor(request.args.get("before"))
+    where_sql, where_params = _keyset_where(before)
+    with _db_connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, rx_time, frame_type, portnum, channel_index, channel_key
+            FROM frames
+            WHERE node_id = ?{where_sql}
+            ORDER BY rx_time DESC, id DESC
+            LIMIT ?
+            """,
+            (node_id, *where_params, NODE_LIST_PAGE_SIZE),
+        ).fetchall()
+    config = _get_channels_config()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["channel_label"] = _channel_label_for_key(item.get("channel_key"), config)
+        items.append(item)
+    return jsonify({"frames": items, "next_cursor": _keyset_page(rows, NODE_LIST_PAGE_SIZE)})
+
+
+# Field membership for a frame's on-demand combined JSON (see _MSG_DERIVED_KEYS).
+_FRAME_DERIVED_KEYS = (
+    "id", "node_id", "frame_type", "portnum", "channel_index", "channel_key",
+    "hops", "rx_rssi", "rx_snr", "packet_id", "rx_time",
+)
+
+
+@app.route("/api/frames/<int:frame_id>")
+def frame_detail_api(frame_id):
+    with _db_connect() as conn:
+        row = conn.execute(
+            """
+            SELECT f.*, n.short_name, n.long_name
+            FROM frames f
+            LEFT JOIN nodes n ON n.node_id = f.node_id
+            WHERE f.id = ?
+            """,
+            (frame_id,),
+        ).fetchone()
+    if row is None:
+        return jsonify({"error": "not found", "frame_id": frame_id}), 404
+    frame = dict(row)
+    raw = _safe_json_loads(frame.pop("raw_json", None))
+    payload = _safe_json_loads(frame.pop("payload_json", None))
+    frame["raw"] = raw
+    frame["payload"] = payload
+
+    # Typed values extracted the same way the ingest path does, so the frame
+    # modal shows the frame's own readings consistently with the node modal.
+    frame_type = frame.get("frame_type")
+    if frame_type == "telemetry":
+        frame["values"] = _extract_sensor_values(payload)
+    elif frame_type == "position":
+        frame["values"] = _position_values(payload)
+    elif frame_type == "nodeinfo":
+        frame["values"] = _extract_nodeinfo({"user": payload or {}})
+    else:
+        frame["values"] = {}
+
+    frame["channel_label"] = _channel_label_for_key(frame.get("channel_key"), _get_channels_config())
+    frame.update(_node_avatar_colors(frame.get("node_id")))
+    frame["sections"] = {
+        "raw": raw,
+        "derived": _pick(frame, _FRAME_DERIVED_KEYS),
+    }
+    return jsonify({"frame": frame})
 
 
 # Field membership for a channel's on-demand combined JSON (see _MSG_DERIVED_KEYS).
