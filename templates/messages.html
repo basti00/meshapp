@@ -111,17 +111,9 @@
         : `<div class="bubble__body bubble__body--meta"><span class="tag">${escapeHtml(msg.portnum || "unknown")}</span></div>`;
     }
 
-    // Colours the name in the avatar's background colour, with a soft glow
-    // in the avatar's foreground colour for contrast against the bubble.
+    // Colours the name in the avatar's background colour.
     function nameStyle(msg) {
-      const parts = [];
-      if (msg.avatar_bg) parts.push(`color: ${msg.avatar_bg}`);
-        // only if white avatar_fg
-      if (msg.avatar_fg && msg.avatar_fg.toLowerCase() === "#ffffff") {
-        const o = msg.avatar_fg;
-        parts.push(`text-shadow: 0 0 1px ${o}`);
-      }
-      return parts.length ? ` style="${escapeHtml(parts.join("; "))}"` : "";
+      return msg.avatar_bg ? ` style="${escapeHtml(`color: ${msg.avatar_bg}`)}"` : "";
     }
 
     // Builds the standard message bubble. The avatar sits in a left column;
