@@ -445,32 +445,6 @@
       row("Fix time", v.fix_time ? formatTimeWithRelative(v.fix_time) : null, frameId);
   }
 
-  // Old position payloads from raw_node_json (fallback for nodes without
-  // stored position frames yet) → same shape _position_values() produces.
-  function positionValuesFromRaw(p) {
-    if (!p || typeof p !== "object") return {};
-    const lat = p.latitude ?? (p.latitudeI !== undefined ? p.latitudeI * 1e-7 : undefined);
-    const lon = p.longitude ?? (p.longitudeI !== undefined ? p.longitudeI * 1e-7 : undefined);
-    return {
-      latitude: lat,
-      longitude: lon,
-      altitude: p.altitude,
-      sats_in_view: p.satsInView ?? p.sats_in_view,
-      precision_bits: p.precisionBits ?? p.precision_bits,
-      location_source: p.locationSource ?? p.location_source,
-      fix_time: p.time ?? p.fixTime,
-    };
-  }
-
-  // Latest-frame block if the archive has one; otherwise fall back to the
-  // node columns (aged by fallbackTime, with no frame to click through to).
-  function blockSource(block, fallbackValues, fallbackTime) {
-    if (block) {
-      return { values: block.values || {}, frameId: block.frame_id, rxTime: block.rx_time };
-    }
-    return { values: fallbackValues || {}, frameId: null, rxTime: fallbackTime || null };
-  }
-
   // ---------- Lazy modal lists ----------
   const FRAME_TYPE_LABELS = {
     telemetry: "Telemetry",
@@ -610,36 +584,17 @@
     }
 
     // One block per frame type, each fed by the newest stored frame of that
-    // kind (falling back to the node columns for pre-archive data). The age
-    // chip and every value link to the exact frame they came from.
+    // kind (the v11 migration backfilled snapshot frames for older nodes).
+    // The age chip and every value link to the exact frame they came from;
+    // blocks with no frame render empty and are dropped by renderSections.
     const latest = node.latest || {};
-    const identity = blockSource(latest.nodeinfo, {
-      short_name: node.short_name,
-      long_name: node.long_name,
-      hw_model: node.hw_model,
-      role: node.role,
-      macaddr: node.macaddr,
-      public_key: node.public_key,
-    }, null);
-    const device = blockSource(latest.device, {
-      battery_level: node.battery_level,
-      battery_voltage: node.battery_voltage,
-      channel_utilization: node.channel_utilization,
-      air_util_tx: node.air_util_tx,
-      uptime_seconds: node.uptime_seconds,
-    }, node.last_telemetry);
-    const environment = blockSource(latest.environment, {
-      temperature: node.temperature,
-      humidity: node.humidity,
-      pressure: node.pressure,
-    }, node.last_telemetry);
-    const position = blockSource(
-      latest.position,
-      positionValuesFromRaw(node.position),
-      node.last_position
-    );
+    const nodeinfo = latest.nodeinfo || {};
+    const device = latest.device || {};
+    const environment = latest.environment || {};
+    const position = latest.position || {};
 
-    const identityHtml = row("Node ID", node.node_id) + identityRows(identity.values, identity.frameId);
+    const identityHtml = row("Node ID", node.node_id) +
+      identityRows(nodeinfo.values || {}, nodeinfo.frame_id);
 
     const activity =
       row("First seen", formatTimeWithRelative(node.first_seen)) +
@@ -658,10 +613,10 @@
       row("Other", fmtCount(node.other_count_total, node.other_count_daily));
 
     const sections = [
-      ["Identity", identityHtml, ageChip(identity.rxTime, identity.frameId)],
-      ["Device", deviceRows(device.values, device.frameId), ageChip(device.rxTime, device.frameId)],
-      ["Environment", environmentRows(environment.values, environment.frameId), ageChip(environment.rxTime, environment.frameId)],
-      ["Position", positionRows(position.values, position.frameId), ageChip(position.rxTime, position.frameId)],
+      ["Identity", identityHtml, ageChip(nodeinfo.rx_time, nodeinfo.frame_id)],
+      ["Device", deviceRows(device.values || {}, device.frame_id), ageChip(device.rx_time, device.frame_id)],
+      ["Environment", environmentRows(environment.values || {}, environment.frame_id), ageChip(environment.rx_time, environment.frame_id)],
+      ["Position", positionRows(position.values || {}, position.frame_id), ageChip(position.rx_time, position.frame_id)],
       ["Activity", activity],
       ["Packet counts", counts],
     ];

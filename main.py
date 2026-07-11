@@ -301,10 +301,93 @@ CHANNEL_COLUMNS = [
 CHANNEL_ROLE_NAMES = {0: "DISABLED", 1: "PRIMARY", 2: "SECONDARY"}
 
 
+def _node_snapshot_frames(node):
+    """One-off v11 migration helper: synthesize frames rows from a legacy node
+    row (columns + raw_node_json) so the node modal's blocks can rely on the
+    frames table exclusively. Payload key shapes match what the ingest path
+    stores; raw_json is stamped `migrated` so the frame modal shows its origin."""
+    frames = []
+    last_seen = node.get("last_seen") or node.get("first_seen") or int(time.time())
+    raw_json = _json_dumps({
+        "migrated": True,
+        "note": "synthesized from the nodes table by the v11 schema migration",
+    })
+
+    def add(frame_type, rx_time, payload):
+        frames.append({
+            "rx_time": rx_time or last_seen,
+            "node_id": node["node_id"],
+            "frame_type": frame_type,
+            "payload_json": _json_dumps(payload),
+            "raw_json": raw_json,
+        })
+
+    user = {
+        "shortName": node.get("short_name"),
+        "longName": node.get("long_name"),
+        "hwModel": node.get("hw_model"),
+        "role": node.get("role"),
+        "macaddr": node.get("macaddr"),
+        "publicKey": node.get("public_key"),
+    }
+    user = {k: v for k, v in user.items() if v is not None}
+    if user:
+        add("nodeinfo", last_seen, user)
+
+    device = {
+        "batteryLevel": node.get("battery_level"),
+        "voltage": node.get("battery_voltage"),
+        "channelUtilization": node.get("channel_utilization"),
+        "airUtilTx": node.get("air_util_tx"),
+        "uptimeSeconds": node.get("uptime_seconds"),
+    }
+    device = {k: v for k, v in device.items() if v is not None}
+    if device:
+        add("telemetry", node.get("last_telemetry"), {"deviceMetrics": device})
+
+    env = {
+        "temperature": node.get("temperature"),
+        "relativeHumidity": node.get("humidity"),
+        "barometricPressure": node.get("pressure"),
+    }
+    env = {k: v for k, v in env.items() if v is not None}
+    if env:
+        add("telemetry", node.get("last_telemetry"), {"environmentMetrics": env})
+
+    raw = _safe_json_loads(node.get("raw_node_json"))
+    position = raw.get("position") if isinstance(raw, dict) else None
+    if isinstance(position, dict) and position:
+        add("position", node.get("last_position"), position)
+
+    return frames
+
+
+def _migrate_v11_backfill_frames(conn):
+    """One-off migration (schema < v11): seed the new frames table with one
+    snapshot frame per data kind for every known node. Runs once -- the v11
+    stamp in init_db() keeps it from re-running. Remove after deploy (per
+    project convention)."""
+    nodes = [dict(row) for row in conn.execute("SELECT * FROM nodes").fetchall()]
+    count = 0
+    for node in nodes:
+        for frame in _node_snapshot_frames(node):
+            columns = list(frame.keys())
+            placeholders = ", ".join(["?"] * len(columns))
+            conn.execute(
+                f"INSERT INTO frames ({', '.join(columns)}) VALUES ({placeholders})",
+                list(frame.values()),
+            )
+            count += 1
+    logging.info(
+        "v11 migration: backfilled %d snapshot frame(s) for %d node(s)", count, len(nodes)
+    )
+
+
 def init_db():
     with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
+        old_version = conn.execute("PRAGMA user_version").fetchone()[0]
         # raw_json holds the verbatim packet (it contains `decoded`). reply_id /
         # thread_root drive whole-tree pagination (see _load_channel_threads);
         # emoji is the tapback reaction (NULL for a normal message), promoted to
@@ -397,6 +480,10 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(channel_key, thread_root)"
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes(last_seen DESC)")
+        # One-time backfill for pre-frames databases (fresh DBs start at 0 and
+        # have nothing to migrate). Stamped v11 below, so it never re-runs.
+        if 0 < old_version < 11:
+            _migrate_v11_backfill_frames(conn)
         conn.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
         conn.commit()
 
@@ -1591,13 +1678,9 @@ def node_detail_api(node_id):
 
     # Raw = the device's accumulated node record (one merged object).
     raw = _safe_json_loads(node.get("raw_node_json")) or {}
-    # Back-compat: the detail view's Position section reads node.position.
-    if isinstance(raw, dict):
-        node["position"] = raw.get("position")
 
-    # Per-frame-type blocks from the frames archive. Nodes that predate the
-    # frames table have none; the UI then falls back to the node columns
-    # (aged by the last_* timestamps) without a frame to click through to.
+    # Per-frame-type blocks from the frames archive (the v11 migration
+    # backfilled snapshot frames for nodes that predate the table).
     node["latest"] = _latest_frame_blocks(node_id)
 
     node["sections"] = {
