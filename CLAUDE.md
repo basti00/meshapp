@@ -31,4 +31,5 @@ Everything server-side is in `main.py` (single file, ~1500 lines):
 
 ## Conventions
 
+* Commit every change separately as its own git commit, after verifying it works on both desktop and mobile layouts.
 * When exiting, suggest a commit message for the changes you made, 10–20 words max.
