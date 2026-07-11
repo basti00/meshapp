@@ -198,49 +198,112 @@
       `</button>`;
   }
 
-  // ---------- Modal ----------
+  // ---------- Stacked modals ----------
+  // Modals are created on demand and stack in the z-direction: opening a
+  // detail from within a modal pushes a new layer while the one beneath
+  // scales back and dims. The X closes layers one by one (it always sits on
+  // the top layer -- lower ones are covered); clicking the dimmed background
+  // closes the whole stack; Escape pops the top layer.
+  const modalStack = [];
   let lastFocus = null;
-  let openModalEl = null;
 
-  function openModal(modal) {
-    if (!modal) return;
-    // Switching directly between modals (e.g. message → node) should not stack.
-    if (openModalEl && openModalEl !== modal) {
-      openModalEl.classList.remove("is-open");
-      openModalEl.setAttribute("aria-hidden", "true");
-    } else if (!openModalEl) {
+  function currentModal() {
+    return modalStack.length ? modalStack[modalStack.length - 1] : null;
+  }
+
+  function pushModal(opts) {
+    // opts: { withAvatar? } -> ctx { layer, modal, avatar, titleName, titleSub, body }
+    if (!modalStack.length) {
       lastFocus = document.activeElement;
+      document.body.style.overflow = "hidden";
+    } else {
+      const below = currentModal();
+      below.modal.classList.add("modal--under");
+      below.layer.setAttribute("aria-hidden", "true");
     }
-    modal.classList.add("is-open");
-    modal.setAttribute("aria-hidden", "false");
-    document.body.style.overflow = "hidden";
-    openModalEl = modal;
-    const close = modal.querySelector(".modal__close");
-    if (close) close.focus();
+    const layer = document.createElement("div");
+    // Only the bottom layer paints the dark overlay; upper layers stay
+    // transparent so the backdrop doesn't compound darker per level.
+    layer.className = "modal-layer" + (modalStack.length ? "" : " modal-layer--base");
+    layer.style.zIndex = String(100 + modalStack.length * 2);
+    layer.setAttribute("role", "dialog");
+    layer.setAttribute("aria-modal", "true");
+    const avatarHtml = opts && opts.withAvatar
+      ? '<span class="avatar modal__avatar" aria-hidden="true">?</span>'
+      : "";
+    layer.innerHTML =
+      '<div class="modal" role="document">' +
+      '<div class="modal__header">' +
+      avatarHtml +
+      '<div class="modal__title">' +
+      '<span class="modal__title-name"></span>' +
+      '<span class="modal__title-sub"></span>' +
+      "</div>" +
+      '<button type="button" class="modal__close" aria-label="Close">&times;</button>' +
+      "</div>" +
+      '<div class="modal__body"></div>' +
+      "</div>";
+    document.body.appendChild(layer);
+    const ctx = {
+      layer,
+      modal: layer.querySelector(".modal"),
+      avatar: layer.querySelector(".modal__avatar"),
+      titleName: layer.querySelector(".modal__title-name"),
+      titleSub: layer.querySelector(".modal__title-sub"),
+      body: layer.querySelector(".modal__body"),
+    };
+    layer.addEventListener("click", function (event) {
+      if (event.target === layer) closeAllModals();
+    });
+    layer.querySelector(".modal__close").addEventListener("click", function () {
+      popModal();
+    });
+    modalStack.push(ctx);
+    layer.querySelector(".modal__close").focus();
+    return ctx;
   }
 
-  function closeModal(modal) {
-    modal = modal || openModalEl;
-    if (!modal) return;
-    modal.classList.remove("is-open");
-    modal.setAttribute("aria-hidden", "true");
+  function removeModalEntry(ctx) {
+    ctx.modal.classList.add("modal--closing");
+    ctx.layer.classList.add("modal-layer--closing");
+    setTimeout(function () { ctx.layer.remove(); }, 160);
+  }
+
+  function restoreLastFocus() {
     document.body.style.overflow = "";
-    if (openModalEl === modal) openModalEl = null;
     if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
+    lastFocus = null;
   }
 
-  function setModalLoading(nodeId) {
-    const titleName = document.getElementById("node-modal-name");
-    const titleSub = document.getElementById("node-modal-sub");
-    const avatar = document.getElementById("node-modal-avatar");
-    const body = document.getElementById("node-modal-body");
-    if (titleName) titleName.textContent = "Loading…";
-    if (titleSub) titleSub.textContent = nodeId || "";
-    if (avatar) {
-      avatar.textContent = "…";
-      avatar.removeAttribute("style");
+  function popModal() {
+    const ctx = modalStack.pop();
+    if (!ctx) return;
+    removeModalEntry(ctx);
+    const top = currentModal();
+    if (top) {
+      top.modal.classList.remove("modal--under");
+      top.layer.setAttribute("aria-hidden", "false");
+      const close = top.layer.querySelector(".modal__close");
+      if (close) close.focus();
+    } else {
+      restoreLastFocus();
     }
-    if (body) body.innerHTML = '<p class="muted">Fetching node details…</p>';
+  }
+
+  function closeAllModals() {
+    if (!modalStack.length) return;
+    while (modalStack.length) removeModalEntry(modalStack.pop());
+    restoreLastFocus();
+  }
+
+  function setNodeModalLoading(ctx, nodeId) {
+    ctx.titleName.textContent = "Loading…";
+    ctx.titleSub.textContent = nodeId || "";
+    if (ctx.avatar) {
+      ctx.avatar.textContent = "…";
+      ctx.avatar.removeAttribute("style");
+    }
+    ctx.body.innerHTML = '<p class="muted">Fetching node details…</p>';
   }
 
   function row(label, value) {
@@ -298,11 +361,11 @@
     );
   }
 
-  function renderDetail(node) {
-    const avatar = document.getElementById("node-modal-avatar");
-    const titleName = document.getElementById("node-modal-name");
-    const titleSub = document.getElementById("node-modal-sub");
-    const body = document.getElementById("node-modal-body");
+  function renderDetail(node, ctx) {
+    const avatar = ctx.avatar;
+    const titleName = ctx.titleName;
+    const titleSub = ctx.titleSub;
+    const body = ctx.body;
 
     const name = node.long_name || node.short_name || node.node_id || "Unknown node";
     const avatarText = avatarTextFor(node.short_name, node.long_name, node.node_id);
@@ -391,26 +454,21 @@
 
   async function showNodeModal(nodeId) {
     if (!nodeId) return;
-    openModal(document.getElementById("node-modal"));
-    setModalLoading(nodeId);
+    const ctx = pushModal({ withAvatar: true });
+    setNodeModalLoading(ctx, nodeId);
     try {
       const response = await fetch(`/api/nodes/${encodeURIComponent(nodeId)}`, { cache: "no-store" });
       if (!response.ok) {
-        const body = document.getElementById("node-modal-body");
-        const titleName = document.getElementById("node-modal-name");
-        if (titleName) titleName.textContent = "Node";
-        if (body) {
-          body.innerHTML = response.status === 404
-            ? '<p class="muted">No record for this node yet.</p>'
-            : `<p class="muted">Failed to load node (${response.status}).</p>`;
-        }
+        ctx.titleName.textContent = "Node";
+        ctx.body.innerHTML = response.status === 404
+          ? '<p class="muted">No record for this node yet.</p>'
+          : `<p class="muted">Failed to load node (${response.status}).</p>`;
         return;
       }
       const payload = await response.json();
-      if (payload && payload.node) renderDetail(payload.node);
+      if (payload && payload.node) renderDetail(payload.node, ctx);
     } catch (err) {
-      const body = document.getElementById("node-modal-body");
-      if (body) body.innerHTML = '<p class="muted">Network error loading node.</p>';
+      ctx.body.innerHTML = '<p class="muted">Network error loading node.</p>';
     }
   }
 
@@ -421,11 +479,9 @@
     return "Text message";
   }
 
-  function setMessageModalLoading() {
-    const titleName = document.getElementById("message-modal-name");
-    const body = document.getElementById("message-modal-body");
-    if (titleName) titleName.textContent = "Loading…";
-    if (body) body.innerHTML = '<p class="muted">Fetching message details…</p>';
+  function setMessageModalLoading(ctx) {
+    ctx.titleName.textContent = "Loading…";
+    ctx.body.innerHTML = '<p class="muted">Fetching message details…</p>';
   }
 
   function isBroadcastTarget(toId) {
@@ -544,13 +600,14 @@
     return `<div class="msg-content">` + textHtml + `</div>`;
   }
 
-  function renderMessageDetail(message) {
-    const titleName = document.getElementById("message-modal-name");
-    const body = document.getElementById("message-modal-body");
+  function renderMessageDetail(message, ctx) {
+    const titleName = ctx.titleName;
+    const body = ctx.body;
 
     const sender = senderParty(message);
 
     if (titleName) titleName.textContent = messageKind(message);
+    ctx.titleSub.textContent = formatTimeWithRelative(message.rx_time);
 
     const decoded = message.decoded || {};
     const raw = message.raw || {};
@@ -622,37 +679,29 @@
 
   async function showMessageModal(messageId) {
     if (messageId === null || messageId === undefined || messageId === "") return;
-    openModal(document.getElementById("message-modal"));
-    setMessageModalLoading();
+    const ctx = pushModal({});
+    setMessageModalLoading(ctx);
     try {
       const response = await fetch(`/api/message/${encodeURIComponent(messageId)}`, { cache: "no-store" });
-      const titleName = document.getElementById("message-modal-name");
-      const body = document.getElementById("message-modal-body");
       if (!response.ok) {
-        if (titleName) titleName.textContent = "Message";
-        if (body) {
-          body.innerHTML = response.status === 404
-            ? '<p class="muted">No record for this message.</p>'
-            : `<p class="muted">Failed to load message (${response.status}).</p>`;
-        }
+        ctx.titleName.textContent = "Message";
+        ctx.body.innerHTML = response.status === 404
+          ? '<p class="muted">No record for this message.</p>'
+          : `<p class="muted">Failed to load message (${response.status}).</p>`;
         return;
       }
       const payload = await response.json();
-      if (payload && payload.message) renderMessageDetail(payload.message);
+      if (payload && payload.message) renderMessageDetail(payload.message, ctx);
     } catch (err) {
-      const body = document.getElementById("message-modal-body");
-      if (body) body.innerHTML = '<p class="muted">Network error loading message.</p>';
+      ctx.body.innerHTML = '<p class="muted">Network error loading message.</p>';
     }
   }
 
   // ---------- Channel modal ----------
-  function setChannelModalLoading(channelKey) {
-    const titleName = document.getElementById("channel-modal-name");
-    const titleSub = document.getElementById("channel-modal-sub");
-    const body = document.getElementById("channel-modal-body");
-    if (titleName) titleName.textContent = "Loading…";
-    if (titleSub) titleSub.textContent = "";
-    if (body) body.innerHTML = '<p class="muted">Fetching channel details…</p>';
+  function setChannelModalLoading(ctx) {
+    ctx.titleName.textContent = "Loading…";
+    ctx.titleSub.textContent = "";
+    ctx.body.innerHTML = '<p class="muted">Fetching channel details…</p>';
   }
 
   // A wider "key" row: the PSK is shown in a selectable monospace block so it
@@ -663,10 +712,10 @@
       `<dd><code class="channel-key">${escapeHtml(String(value))}</code></dd>`;
   }
 
-  function renderChannelDetail(channel) {
-    const titleName = document.getElementById("channel-modal-name");
-    const titleSub = document.getElementById("channel-modal-sub");
-    const body = document.getElementById("channel-modal-body");
+  function renderChannelDetail(channel, ctx) {
+    const titleName = ctx.titleName;
+    const titleSub = ctx.titleSub;
+    const body = ctx.body;
 
     if (titleName) titleName.textContent = channel.display_name || "Channel";
     if (titleSub) {
@@ -726,41 +775,25 @@
 
   async function showChannelModal(channelKey) {
     if (channelKey === null || channelKey === undefined || channelKey === "") return;
-    openModal(document.getElementById("channel-modal"));
-    setChannelModalLoading(channelKey);
+    const ctx = pushModal({});
+    setChannelModalLoading(ctx);
     try {
       const response = await fetch(`/api/channels/${encodeURIComponent(channelKey)}`, { cache: "no-store" });
-      const titleName = document.getElementById("channel-modal-name");
-      const body = document.getElementById("channel-modal-body");
       if (!response.ok) {
-        if (titleName) titleName.textContent = "Channel";
-        if (body) body.innerHTML = `<p class="muted">Failed to load channel (${response.status}).</p>`;
+        ctx.titleName.textContent = "Channel";
+        ctx.body.innerHTML = `<p class="muted">Failed to load channel (${response.status}).</p>`;
         return;
       }
       const payload = await response.json();
-      if (payload && payload.channel) renderChannelDetail(payload.channel);
+      if (payload && payload.channel) renderChannelDetail(payload.channel, ctx);
     } catch (err) {
-      const body = document.getElementById("channel-modal-body");
-      if (body) body.innerHTML = '<p class="muted">Network error loading channel.</p>';
+      ctx.body.innerHTML = '<p class="muted">Network error loading channel.</p>';
     }
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    const modals = [
-      document.getElementById("node-modal"),
-      document.getElementById("message-modal"),
-      document.getElementById("channel-modal"),
-    ];
-    modals.forEach(function (modal) {
-      if (!modal) return;
-      modal.addEventListener("click", function (event) {
-        if (event.target === modal) closeModal(modal);
-      });
-      const close = modal.querySelector(".modal__close");
-      if (close) close.addEventListener("click", function () { closeModal(modal); });
-    });
     document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape" && openModalEl) closeModal(openModalEl);
+      if (event.key === "Escape" && modalStack.length) popModal();
     });
 
     // Delegated click handling so dynamically-rendered rows work too

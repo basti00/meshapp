@@ -751,21 +751,31 @@ body:has(.messages-page) main {
 }
 
 /* ---------- Modal ---------- */
-.modal-backdrop {
+/* Modal layers stack on top of each other (one per open modal). Only the
+   bottom layer paints the dark overlay so the backdrop doesn't compound
+   darker with every level; upper layers are transparent but still catch
+   background clicks (close-all). */
+.modal-layer {
   position: fixed;
   inset: 0;
-  background: var(--overlay);
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 16px;
-  z-index: 100;
-  backdrop-filter: blur(3px);
 }
 
-.modal-backdrop.is-open {
-  display: flex;
+.modal-layer--base {
+  background: var(--overlay);
+  backdrop-filter: blur(3px);
   animation: fadeIn 0.15s ease-out;
+}
+
+.modal-layer--closing {
+  pointer-events: none;
+}
+
+.modal-layer--base.modal-layer--closing {
+  animation: fadeOut 0.15s ease-out forwards;
 }
 
 .modal {
@@ -780,6 +790,19 @@ body:has(.messages-page) main {
   display: flex;
   flex-direction: column;
   animation: pop 0.18s ease-out;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+/* A modal with another layer stacked on top: recede slightly and dim, like a
+   card pushed back in z. */
+.modal--under {
+  transform: scale(0.95) translateY(-10px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.modal--closing {
+  animation: popOut 0.15s ease-in forwards;
 }
 
 .modal__header {
@@ -1106,6 +1129,14 @@ button.msg-quote:hover .msg-quote__go { color: var(--accent); }
 @keyframes pop {
   from { opacity: 0; transform: translateY(8px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes popOut {
+  to { opacity: 0; transform: translateY(8px) scale(0.97); }
+}
+
+@keyframes fadeOut {
+  to { opacity: 0; }
 }
 
 /* ---------- Responsive: stacked card layout for nodes ---------- */
