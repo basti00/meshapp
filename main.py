@@ -12,7 +12,7 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 from meshtastic.serial_interface import SerialInterface
 from pubsub import pub
 
-DB_SCHEMA_VERSION = 10
+DB_SCHEMA_VERSION = 11
 DB_PATH = Path(__file__).with_name("meshapp.db")
 DEVICE_PATH = os.environ.get("MESH_DEVICE", "/dev/ttyACM0")
 DEFAULT_CHANNEL_INDEX = int(os.environ.get("MESH_CHANNEL", "0"))
@@ -301,10 +301,93 @@ CHANNEL_COLUMNS = [
 CHANNEL_ROLE_NAMES = {0: "DISABLED", 1: "PRIMARY", 2: "SECONDARY"}
 
 
+def _node_snapshot_frames(node):
+    """One-off v11 migration helper: synthesize frames rows from a legacy node
+    row (columns + raw_node_json) so the node modal's blocks can rely on the
+    frames table exclusively. Payload key shapes match what the ingest path
+    stores; raw_json is stamped `migrated` so the frame modal shows its origin."""
+    frames = []
+    last_seen = node.get("last_seen") or node.get("first_seen") or int(time.time())
+    raw_json = _json_dumps({
+        "migrated": True,
+        "note": "synthesized from the nodes table by the v11 schema migration",
+    })
+
+    def add(frame_type, rx_time, payload):
+        frames.append({
+            "rx_time": rx_time or last_seen,
+            "node_id": node["node_id"],
+            "frame_type": frame_type,
+            "payload_json": _json_dumps(payload),
+            "raw_json": raw_json,
+        })
+
+    user = {
+        "shortName": node.get("short_name"),
+        "longName": node.get("long_name"),
+        "hwModel": node.get("hw_model"),
+        "role": node.get("role"),
+        "macaddr": node.get("macaddr"),
+        "publicKey": node.get("public_key"),
+    }
+    user = {k: v for k, v in user.items() if v is not None}
+    if user:
+        add("nodeinfo", last_seen, user)
+
+    device = {
+        "batteryLevel": node.get("battery_level"),
+        "voltage": node.get("battery_voltage"),
+        "channelUtilization": node.get("channel_utilization"),
+        "airUtilTx": node.get("air_util_tx"),
+        "uptimeSeconds": node.get("uptime_seconds"),
+    }
+    device = {k: v for k, v in device.items() if v is not None}
+    if device:
+        add("telemetry", node.get("last_telemetry"), {"deviceMetrics": device})
+
+    env = {
+        "temperature": node.get("temperature"),
+        "relativeHumidity": node.get("humidity"),
+        "barometricPressure": node.get("pressure"),
+    }
+    env = {k: v for k, v in env.items() if v is not None}
+    if env:
+        add("telemetry", node.get("last_telemetry"), {"environmentMetrics": env})
+
+    raw = _safe_json_loads(node.get("raw_node_json"))
+    position = raw.get("position") if isinstance(raw, dict) else None
+    if isinstance(position, dict) and position:
+        add("position", node.get("last_position"), position)
+
+    return frames
+
+
+def _migrate_v11_backfill_frames(conn):
+    """One-off migration (schema < v11): seed the new frames table with one
+    snapshot frame per data kind for every known node. Runs once -- the v11
+    stamp in init_db() keeps it from re-running. Remove after deploy (per
+    project convention)."""
+    nodes = [dict(row) for row in conn.execute("SELECT * FROM nodes").fetchall()]
+    count = 0
+    for node in nodes:
+        for frame in _node_snapshot_frames(node):
+            columns = list(frame.keys())
+            placeholders = ", ".join(["?"] * len(columns))
+            conn.execute(
+                f"INSERT INTO frames ({', '.join(columns)}) VALUES ({placeholders})",
+                list(frame.values()),
+            )
+            count += 1
+    logging.info(
+        "v11 migration: backfilled %d snapshot frame(s) for %d node(s)", count, len(nodes)
+    )
+
+
 def init_db():
     with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
+        old_version = conn.execute("PRAGMA user_version").fetchone()[0]
         # raw_json holds the verbatim packet (it contains `decoded`). reply_id /
         # thread_root drive whole-tree pagination (see _load_channel_threads);
         # emoji is the tapback reaction (NULL for a normal message), promoted to
@@ -353,8 +436,42 @@ def init_db():
             )
             """
         )
+        # Every received non-message frame, verbatim, one row per packet.
+        # Messages stay in their own table; keeping frames separate means old
+        # telemetry/position spam can be FIFO-pruned later without touching
+        # chat history. payload_json is the decoded typed sub-payload
+        # (telemetry/position/user dict) so queries can json_extract() it
+        # without re-parsing the whole packet.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS frames (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rx_time INTEGER NOT NULL,
+                node_id TEXT,
+                frame_type TEXT,
+                portnum TEXT,
+                channel_index INTEGER,
+                channel_key TEXT,
+                hops INTEGER,
+                rx_rssi REAL,
+                rx_snr REAL,
+                packet_id INTEGER,
+                payload_json TEXT,
+                raw_json TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_frames_node_time ON frames(node_id, rx_time DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_frames_node_type_time ON frames(node_id, frame_type, rx_time DESC)"
+        )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_channel_key_time ON messages(channel_key, rx_time DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_from_time ON messages(from_id, rx_time DESC)"
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_packet_id ON messages(packet_id)"
@@ -363,6 +480,10 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(channel_key, thread_root)"
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes(last_seen DESC)")
+        # One-time backfill for pre-frames databases (fresh DBs start at 0 and
+        # have nothing to migrate). Stamped v11 below, so it never re-runs.
+        if 0 < old_version < 11:
+            _migrate_v11_backfill_frames(conn)
         conn.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
         conn.commit()
 
@@ -492,6 +613,15 @@ def _channel_display_name(channel_index, name):
     return "Channel ?"
 
 
+def _channel_label_for_key(channel_key, config=None):
+    """Human display name for a message/frame channel_key ("Primary", name, ...)."""
+    index = _channel_key_to_index(channel_key)
+    name = None
+    if config and index is not None and index in config:
+        name = config[index].get("name")
+    return _channel_display_name(index, name)
+
+
 def _resolve_thread_root(conn, channel_key, packet_id, reply_id):
     """Pick the thread_root for a message.
 
@@ -552,6 +682,15 @@ def _insert_message(**message):
         sql = f"INSERT INTO messages ({', '.join(columns)}) VALUES ({placeholders})"
         conn.execute(sql, list(message.values()))
         _reconcile_thread_root(conn, channel_key, packet_id, message["thread_root"])
+        conn.commit()
+
+
+def _insert_frame(**frame):
+    columns = list(frame.keys())
+    placeholders = ", ".join(["?"] * len(columns))
+    sql = f"INSERT INTO frames ({', '.join(columns)}) VALUES ({placeholders})"
+    with _db_connect() as conn:
+        conn.execute(sql, list(frame.values()))
         conn.commit()
 
 
@@ -802,6 +941,33 @@ def _extract_position(decoded):
     return None
 
 
+def _position_values(position):
+    """Normalise a decoded position payload into display fields (integer
+    latitudeI/longitudeI fall back to degrees when the float form is absent)."""
+    if not isinstance(position, dict):
+        return {}
+
+    def _degrees(float_key, int_keys):
+        value = position.get(float_key)
+        if value is not None:
+            return value
+        for key in int_keys:
+            scaled = _coerce_int(position.get(key))
+            if scaled is not None:
+                return scaled * 1e-7
+        return None
+
+    return {
+        "latitude": _degrees("latitude", ("latitudeI", "latitude_i")),
+        "longitude": _degrees("longitude", ("longitudeI", "longitude_i")),
+        "altitude": position.get("altitude"),
+        "sats_in_view": position.get("satsInView") or position.get("sats_in_view"),
+        "precision_bits": position.get("precisionBits") or position.get("precision_bits"),
+        "location_source": position.get("locationSource") or position.get("location_source"),
+        "fix_time": position.get("time") or position.get("fixTime"),
+    }
+
+
 def _classify_non_message(message_text, portnum, telemetry, position, nodeinfo):
     if message_text:
         return None
@@ -884,6 +1050,32 @@ def handle_packet(packet, interface=None):
             packet_id=_coerce_int(packet.get("id")),
             reply_id=reply_id,
             emoji=emoji,
+            raw_json=_json_dumps(packet),
+        )
+
+    if non_message_type and from_id:
+        # Archive the whole frame so node details can always point at the
+        # exact packet a value came from (columns only keep the latest).
+        if telemetry:
+            payload = telemetry
+        elif position:
+            payload = position
+        else:
+            payload = decoded.get("user") or decoded.get("nodeInfo") or decoded.get("nodeinfo")
+            if not isinstance(payload, dict):
+                payload = None
+        _insert_frame(
+            rx_time=rx_time,
+            node_id=from_id,
+            frame_type=non_message_type,
+            portnum=str(portnum) if portnum else None,
+            channel_index=channel_index,
+            channel_key=channel_key,
+            hops=hops,
+            rx_rssi=packet.get("rxRssi"),
+            rx_snr=packet.get("rxSnr"),
+            packet_id=_coerce_int(packet.get("id")),
+            payload_json=_json_dumps(payload) if payload is not None else None,
             raw_json=_json_dumps(packet),
         )
 
@@ -1400,6 +1592,78 @@ _NODE_DERIVED_KEYS = (
 )
 
 
+_DEVICE_METRIC_KEYS = (
+    "battery_level", "battery_voltage", "channel_utilization",
+    "air_util_tx", "uptime_seconds",
+)
+_ENVIRONMENT_METRIC_KEYS = ("temperature", "humidity", "pressure")
+
+
+def _latest_frame_row(conn, node_id, extra_sql, params=()):
+    return conn.execute(
+        f"""
+        SELECT id, rx_time, payload_json FROM frames
+        WHERE node_id = ? AND {extra_sql}
+        ORDER BY rx_time DESC, id DESC LIMIT 1
+        """,
+        (node_id, *params),
+    ).fetchone()
+
+
+def _latest_frame_blocks(node_id):
+    """Materialise the newest stored frame of each kind into the value blocks
+    the node modal shows. Each block carries the source frame's id and rx_time
+    so the UI can label values with their age and open the exact frame.
+
+    Device and environment metrics ride in separate TELEMETRY frames, so each
+    gets its own "latest" lookup (a device-metrics frame must not reset the
+    age of the environment readings, and vice versa)."""
+    blocks = {}
+    with _db_connect() as conn:
+        row = _latest_frame_row(conn, node_id, "frame_type = 'nodeinfo'")
+        if row is not None:
+            user = _safe_json_loads(row["payload_json"]) or {}
+            blocks["nodeinfo"] = {
+                "frame_id": row["id"],
+                "rx_time": row["rx_time"],
+                "values": _extract_nodeinfo({"user": user}),
+            }
+        row = _latest_frame_row(
+            conn, node_id,
+            "frame_type = 'telemetry' AND ("
+            "json_extract(payload_json, '$.deviceMetrics') IS NOT NULL "
+            "OR json_extract(payload_json, '$.device_metrics') IS NOT NULL)",
+        )
+        if row is not None:
+            values = _extract_sensor_values(_safe_json_loads(row["payload_json"]))
+            blocks["device"] = {
+                "frame_id": row["id"],
+                "rx_time": row["rx_time"],
+                "values": {k: values.get(k) for k in _DEVICE_METRIC_KEYS},
+            }
+        row = _latest_frame_row(
+            conn, node_id,
+            "frame_type = 'telemetry' AND ("
+            "json_extract(payload_json, '$.environmentMetrics') IS NOT NULL "
+            "OR json_extract(payload_json, '$.environment_metrics') IS NOT NULL)",
+        )
+        if row is not None:
+            values = _extract_sensor_values(_safe_json_loads(row["payload_json"]))
+            blocks["environment"] = {
+                "frame_id": row["id"],
+                "rx_time": row["rx_time"],
+                "values": {k: values.get(k) for k in _ENVIRONMENT_METRIC_KEYS},
+            }
+        row = _latest_frame_row(conn, node_id, "frame_type = 'position'")
+        if row is not None:
+            blocks["position"] = {
+                "frame_id": row["id"],
+                "rx_time": row["rx_time"],
+                "values": _position_values(_safe_json_loads(row["payload_json"])),
+            }
+    return blocks
+
+
 @app.route("/api/nodes/<path:node_id>")
 def node_detail_api(node_id):
     with _db_connect() as conn:
@@ -1414,15 +1678,133 @@ def node_detail_api(node_id):
 
     # Raw = the device's accumulated node record (one merged object).
     raw = _safe_json_loads(node.get("raw_node_json")) or {}
-    # Back-compat: the detail view's Position section reads node.position.
-    if isinstance(raw, dict):
-        node["position"] = raw.get("position")
+
+    # Per-frame-type blocks from the frames archive (the v11 migration
+    # backfilled snapshot frames for nodes that predate the table).
+    node["latest"] = _latest_frame_blocks(node_id)
 
     node["sections"] = {
         "raw": raw,
         "derived": _pick(node, _NODE_DERIVED_KEYS),
     }
     return jsonify({"node": node})
+
+
+# Rows per page for the node modal's lazy message/frame lists.
+NODE_LIST_PAGE_SIZE = 30
+
+
+def _keyset_page(rows, limit):
+    """next_cursor for a ``rx_time DESC, id DESC`` keyset page ("<rx_time>:<id>"),
+    or None once the page comes up short (start of history)."""
+    if len(rows) < limit:
+        return None
+    last = rows[-1]
+    return f"{last['rx_time']}:{last['id']}"
+
+
+def _keyset_where(before):
+    if before is None:
+        return "", []
+    rx_time, row_id = before
+    return " AND (rx_time < ? OR (rx_time = ? AND id < ?))", [rx_time, rx_time, row_id]
+
+
+@app.route("/api/nodes/<path:node_id>/messages")
+def node_messages_api(node_id):
+    before = _parse_cursor(request.args.get("before"))
+    where_sql, where_params = _keyset_where(before)
+    with _db_connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, rx_time, text, emoji, portnum, channel_index, channel_key
+            FROM messages
+            WHERE from_id = ?{where_sql}
+            ORDER BY rx_time DESC, id DESC
+            LIMIT ?
+            """,
+            (node_id, *where_params, NODE_LIST_PAGE_SIZE),
+        ).fetchall()
+    config = _get_channels_config()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["is_tapback"] = bool(item.get("emoji"))
+        item["channel_label"] = _channel_label_for_key(item.get("channel_key"), config)
+        items.append(item)
+    return jsonify({"messages": items, "next_cursor": _keyset_page(rows, NODE_LIST_PAGE_SIZE)})
+
+
+@app.route("/api/nodes/<path:node_id>/frames")
+def node_frames_api(node_id):
+    before = _parse_cursor(request.args.get("before"))
+    where_sql, where_params = _keyset_where(before)
+    with _db_connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, rx_time, frame_type, portnum, channel_index, channel_key
+            FROM frames
+            WHERE node_id = ?{where_sql}
+            ORDER BY rx_time DESC, id DESC
+            LIMIT ?
+            """,
+            (node_id, *where_params, NODE_LIST_PAGE_SIZE),
+        ).fetchall()
+    config = _get_channels_config()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["channel_label"] = _channel_label_for_key(item.get("channel_key"), config)
+        items.append(item)
+    return jsonify({"frames": items, "next_cursor": _keyset_page(rows, NODE_LIST_PAGE_SIZE)})
+
+
+# Field membership for a frame's on-demand combined JSON (see _MSG_DERIVED_KEYS).
+_FRAME_DERIVED_KEYS = (
+    "id", "node_id", "frame_type", "portnum", "channel_index", "channel_key",
+    "hops", "rx_rssi", "rx_snr", "packet_id", "rx_time",
+)
+
+
+@app.route("/api/frames/<int:frame_id>")
+def frame_detail_api(frame_id):
+    with _db_connect() as conn:
+        row = conn.execute(
+            """
+            SELECT f.*, n.short_name, n.long_name
+            FROM frames f
+            LEFT JOIN nodes n ON n.node_id = f.node_id
+            WHERE f.id = ?
+            """,
+            (frame_id,),
+        ).fetchone()
+    if row is None:
+        return jsonify({"error": "not found", "frame_id": frame_id}), 404
+    frame = dict(row)
+    raw = _safe_json_loads(frame.pop("raw_json", None))
+    payload = _safe_json_loads(frame.pop("payload_json", None))
+    frame["raw"] = raw
+    frame["payload"] = payload
+
+    # Typed values extracted the same way the ingest path does, so the frame
+    # modal shows the frame's own readings consistently with the node modal.
+    frame_type = frame.get("frame_type")
+    if frame_type == "telemetry":
+        frame["values"] = _extract_sensor_values(payload)
+    elif frame_type == "position":
+        frame["values"] = _position_values(payload)
+    elif frame_type == "nodeinfo":
+        frame["values"] = _extract_nodeinfo({"user": payload or {}})
+    else:
+        frame["values"] = {}
+
+    frame["channel_label"] = _channel_label_for_key(frame.get("channel_key"), _get_channels_config())
+    frame.update(_node_avatar_colors(frame.get("node_id")))
+    frame["sections"] = {
+        "raw": raw,
+        "derived": _pick(frame, _FRAME_DERIVED_KEYS),
+    }
+    return jsonify({"frame": frame})
 
 
 # Field membership for a channel's on-demand combined JSON (see _MSG_DERIVED_KEYS).

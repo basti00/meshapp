@@ -86,6 +86,31 @@
     return rel ? `${abs} (${rel} ago)` : abs;
   }
 
+  // Compact age ("1h 5m ago") for the low-contrast per-block age chips.
+  function formatAge(epochSeconds) {
+    const rel = formatRelative(epochSeconds);
+    return rel ? `${rel} ago` : null;
+  }
+
+  function formatDuration(seconds) {
+    if (seconds === null || seconds === undefined) return "-";
+    const n = Number(seconds);
+    if (!Number.isFinite(n) || n < 0) return "-";
+    const days = Math.floor(n / 86400);
+    const hours = Math.floor((n % 86400) / 3600);
+    const minutes = Math.floor((n % 3600) / 60);
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  }
+
+  function formatCoord(value) {
+    if (value === null || value === undefined) return "-";
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "-";
+    return n.toFixed(5);
+  }
+
   function formatValue(value, digits) {
     if (digits === undefined) digits = 2;
     if (value === null || value === undefined || value === "") return "-";
@@ -198,54 +223,124 @@
       `</button>`;
   }
 
-  // ---------- Modal ----------
+  // ---------- Stacked modals ----------
+  // Modals are created on demand and stack in the z-direction: opening a
+  // detail from within a modal pushes a new layer while the one beneath
+  // scales back and dims. The X closes layers one by one (it always sits on
+  // the top layer -- lower ones are covered); clicking the dimmed background
+  // closes the whole stack; Escape pops the top layer.
+  const modalStack = [];
   let lastFocus = null;
-  let openModalEl = null;
 
-  function openModal(modal) {
-    if (!modal) return;
-    // Switching directly between modals (e.g. message → node) should not stack.
-    if (openModalEl && openModalEl !== modal) {
-      openModalEl.classList.remove("is-open");
-      openModalEl.setAttribute("aria-hidden", "true");
-    } else if (!openModalEl) {
+  function currentModal() {
+    return modalStack.length ? modalStack[modalStack.length - 1] : null;
+  }
+
+  function pushModal(opts) {
+    // opts: { withAvatar? } -> ctx { layer, modal, avatar, titleName, titleSub, body }
+    if (!modalStack.length) {
       lastFocus = document.activeElement;
+      document.body.style.overflow = "hidden";
+    } else {
+      const below = currentModal();
+      below.modal.classList.add("modal--under");
+      below.layer.setAttribute("aria-hidden", "true");
     }
-    modal.classList.add("is-open");
-    modal.setAttribute("aria-hidden", "false");
-    document.body.style.overflow = "hidden";
-    openModalEl = modal;
-    const close = modal.querySelector(".modal__close");
-    if (close) close.focus();
+    const layer = document.createElement("div");
+    // Only the bottom layer paints the dark overlay; upper layers stay
+    // transparent so the backdrop doesn't compound darker per level.
+    layer.className = "modal-layer" + (modalStack.length ? "" : " modal-layer--base");
+    layer.style.zIndex = String(100 + modalStack.length * 2);
+    layer.setAttribute("role", "dialog");
+    layer.setAttribute("aria-modal", "true");
+    const avatarHtml = opts && opts.withAvatar
+      ? '<span class="avatar modal__avatar" aria-hidden="true">?</span>'
+      : "";
+    layer.innerHTML =
+      '<div class="modal" role="document">' +
+      '<div class="modal__header">' +
+      avatarHtml +
+      '<div class="modal__title">' +
+      '<span class="modal__title-name"></span>' +
+      '<span class="modal__title-sub"></span>' +
+      "</div>" +
+      '<button type="button" class="modal__close" aria-label="Close">&times;</button>' +
+      "</div>" +
+      '<div class="modal__body"></div>' +
+      "</div>";
+    document.body.appendChild(layer);
+    const ctx = {
+      layer,
+      modal: layer.querySelector(".modal"),
+      avatar: layer.querySelector(".modal__avatar"),
+      titleName: layer.querySelector(".modal__title-name"),
+      titleSub: layer.querySelector(".modal__title-sub"),
+      body: layer.querySelector(".modal__body"),
+    };
+    layer.addEventListener("click", function (event) {
+      if (event.target === layer) closeAllModals();
+    });
+    layer.querySelector(".modal__close").addEventListener("click", function () {
+      popModal();
+    });
+    modalStack.push(ctx);
+    layer.querySelector(".modal__close").focus();
+    return ctx;
   }
 
-  function closeModal(modal) {
-    modal = modal || openModalEl;
-    if (!modal) return;
-    modal.classList.remove("is-open");
-    modal.setAttribute("aria-hidden", "true");
+  function removeModalEntry(ctx) {
+    ctx.modal.classList.add("modal--closing");
+    ctx.layer.classList.add("modal-layer--closing");
+    setTimeout(function () { ctx.layer.remove(); }, 160);
+  }
+
+  function restoreLastFocus() {
     document.body.style.overflow = "";
-    if (openModalEl === modal) openModalEl = null;
     if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
+    lastFocus = null;
   }
 
-  function setModalLoading(nodeId) {
-    const titleName = document.getElementById("node-modal-name");
-    const titleSub = document.getElementById("node-modal-sub");
-    const avatar = document.getElementById("node-modal-avatar");
-    const body = document.getElementById("node-modal-body");
-    if (titleName) titleName.textContent = "Loading…";
-    if (titleSub) titleSub.textContent = nodeId || "";
-    if (avatar) {
-      avatar.textContent = "…";
-      avatar.removeAttribute("style");
+  function popModal() {
+    const ctx = modalStack.pop();
+    if (!ctx) return;
+    removeModalEntry(ctx);
+    const top = currentModal();
+    if (top) {
+      top.modal.classList.remove("modal--under");
+      top.layer.setAttribute("aria-hidden", "false");
+      const close = top.layer.querySelector(".modal__close");
+      if (close) close.focus();
+    } else {
+      restoreLastFocus();
     }
-    if (body) body.innerHTML = '<p class="muted">Fetching node details…</p>';
   }
 
-  function row(label, value) {
+  function closeAllModals() {
+    if (!modalStack.length) return;
+    while (modalStack.length) removeModalEntry(modalStack.pop());
+    restoreLastFocus();
+  }
+
+  function setNodeModalLoading(ctx, nodeId) {
+    ctx.titleName.textContent = "Loading…";
+    ctx.titleSub.textContent = nodeId || "";
+    if (ctx.avatar) {
+      ctx.avatar.textContent = "…";
+      ctx.avatar.removeAttribute("style");
+    }
+    ctx.body.innerHTML = '<p class="muted">Fetching node details…</p>';
+  }
+
+  // When frameId is given the value becomes a click-through to the exact
+  // received frame it came from (opens the frame modal on top).
+  function row(label, value, frameId) {
     if (value === undefined || value === null || value === "" || value === "-") return "";
-    return `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd>`;
+    const text = escapeHtml(String(value));
+    const dd = frameId !== undefined && frameId !== null
+      ? `<button type="button" class="value-link" data-frame-id="${escapeHtml(String(frameId))}" ` +
+        `title="Show the received frame">${text}</button>`
+      : text;
+    return `<dt>${escapeHtml(label)}</dt><dd>${dd}</dd>`;
   }
 
   // Like row(), but the value is trusted HTML (e.g. capsules) rather than text.
@@ -254,12 +349,27 @@
     return `<dt>${escapeHtml(label)}</dt><dd>${html}</dd>`;
   }
 
+  // Small low-contrast "1h ago" chip for a block of values; clickable when it
+  // can point at the frame that delivered them.
+  function ageChip(rxTime, frameId) {
+    const age = formatAge(rxTime);
+    if (!age) return "";
+    const abs = formatTime(rxTime);
+    if (frameId !== undefined && frameId !== null) {
+      return `<button type="button" class="age-chip" data-frame-id="${escapeHtml(String(frameId))}" ` +
+        `title="Received ${escapeHtml(abs)} — show frame">${escapeHtml(age)}</button>`;
+    }
+    return `<span class="age-chip" title="Received ${escapeHtml(abs)}">${escapeHtml(age)}</span>`;
+  }
+
+  // sections: [title, contentRowsHtml, metaHtml?] — metaHtml (e.g. an age
+  // chip) right-aligns in the section title row.
   function renderSections(sections) {
     return sections
       .filter(([_, content]) => content && content.trim().length)
-      .map(([title, content]) =>
+      .map(([title, content, metaHtml]) =>
         `<div class="modal__section">` +
-        `<h3 class="modal__section-title">${escapeHtml(title)}</h3>` +
+        `<h3 class="modal__section-title"><span>${escapeHtml(title)}</span>${metaHtml || ""}</h3>` +
         `<dl class="detail-grid">${content}</dl>` +
         `</div>`
       )
@@ -298,11 +408,165 @@
     );
   }
 
-  function renderDetail(node) {
-    const avatar = document.getElementById("node-modal-avatar");
-    const titleName = document.getElementById("node-modal-name");
-    const titleSub = document.getElementById("node-modal-sub");
-    const body = document.getElementById("node-modal-body");
+  // ---------- Typed frame-value rows ----------
+  // One renderer per frame type, shared by the node modal (latest values) and
+  // the frame modal (that frame's values), so the same reading always renders
+  // the same way no matter where it shows up.
+  function identityRows(v, frameId) {
+    return row("Short name", v.short_name, frameId) +
+      row("Long name", v.long_name, frameId) +
+      row("Hardware", v.hw_model, frameId) +
+      row("Role", v.role, frameId) +
+      row("MAC address", v.macaddr, frameId) +
+      row("Public key", v.public_key, frameId);
+  }
+
+  function deviceRows(v, frameId) {
+    return row("Battery", formatValueUnit(v.battery_level, "%"), frameId) +
+      row("Voltage", formatValueUnit(v.battery_voltage, "V"), frameId) +
+      row("Channel util", formatValueUnit(v.channel_utilization, "%"), frameId) +
+      row("Air util TX", formatValueUnit(v.air_util_tx, "%"), frameId) +
+      row("Uptime", formatDuration(v.uptime_seconds), frameId);
+  }
+
+  function environmentRows(v, frameId) {
+    return row("Temperature", formatValueUnit(v.temperature, "°C"), frameId) +
+      row("Humidity", formatValueUnit(v.humidity, "%hr"), frameId) +
+      row("Pressure", formatValueUnit(v.pressure, "mbar"), frameId);
+  }
+
+  function positionRows(v, frameId) {
+    return row("Latitude", formatCoord(v.latitude), frameId) +
+      row("Longitude", formatCoord(v.longitude), frameId) +
+      row("Altitude", formatValueUnit(v.altitude, "m"), frameId) +
+      row("Satellites", formatValue(v.sats_in_view), frameId) +
+      row("Precision", formatValue(v.precision_bits), frameId) +
+      row("Source", v.location_source, frameId) +
+      row("Fix time", v.fix_time ? formatTimeWithRelative(v.fix_time) : null, frameId);
+  }
+
+  // ---------- Lazy modal lists ----------
+  const FRAME_TYPE_LABELS = {
+    telemetry: "Telemetry",
+    position: "Position",
+    nodeinfo: "Node info",
+    other: "Other",
+  };
+
+  function renderMessageListItem(m) {
+    const text = m.is_tapback
+      ? `Reacted with ${m.emoji || m.text || "·"}`
+      : (m.text || m.portnum || "(no text)");
+    return `<button type="button" class="list-item" data-message-id="${escapeHtml(String(m.id))}">` +
+      `<span class="list-item__text">${escapeHtml(text)}</span>` +
+      `<span class="list-item__meta">` +
+      `<span class="pill">${escapeHtml(m.channel_label || "?")}</span>` +
+      `<time class="list-item__time">${escapeHtml(formatMessageTime(m.rx_time))}</time>` +
+      `</span></button>`;
+  }
+
+  function renderFrameListItem(f) {
+    const type = FRAME_TYPE_LABELS[f.frame_type] || f.frame_type || "Frame";
+    const typeCls = escapeHtml(f.frame_type || "other");
+    const port = f.frame_type === "other" && f.portnum
+      ? `<span class="list-item__detail">${escapeHtml(f.portnum)}</span>`
+      : "";
+    return `<button type="button" class="list-item" data-frame-id="${escapeHtml(String(f.id))}">` +
+      `<span class="list-item__text"><span class="frame-tag frame-tag--${typeCls}">${escapeHtml(type)}</span>${port}</span>` +
+      `<span class="list-item__meta">` +
+      `<span class="pill">${escapeHtml(f.channel_label || "?")}</span>` +
+      `<time class="list-item__time">${escapeHtml(formatMessageTime(f.rx_time))}</time>` +
+      `</span></button>`;
+  }
+
+  // Fills `container` page by page as the user scrolls it (newest first).
+  // fetchPage(cursor) resolves to { items, next_cursor }. Keeps loading while
+  // the content is shorter than the container so the list starts filled.
+  function initLazyList(container, fetchPage, renderItem, emptyText) {
+    let cursor = null;
+    let done = false;
+    let loading = false;
+
+    async function loadMore() {
+      if (loading || done) return;
+      loading = true;
+      const status = container.querySelector(".modal-list__status");
+      try {
+        const payload = await fetchPage(cursor);
+        const items = payload.items || [];
+        cursor = payload.next_cursor || null;
+        if (!cursor) done = true;
+        if (items.length && status) {
+          status.insertAdjacentHTML("beforebegin", items.map(renderItem).join(""));
+        }
+        if (status) {
+          if (!done) status.textContent = "";
+          else status.textContent = container.querySelector(".list-item") ? "" : emptyText;
+        }
+      } catch (err) {
+        done = true;
+        if (status) status.textContent = "Failed to load.";
+      } finally {
+        loading = false;
+      }
+    }
+
+    async function fill() {
+      await loadMore();
+      while (!done && container.scrollHeight <= container.clientHeight + 4) {
+        await loadMore();
+      }
+    }
+
+    container.addEventListener("scroll", function () {
+      if (container.scrollHeight - container.scrollTop - container.clientHeight < 60) {
+        loadMore();
+      }
+    });
+    fill();
+  }
+
+  function lazyListHtml(kind) {
+    return `<div class="modal-list" data-list="${kind}">` +
+      `<div class="modal-list__status muted">Loading…</div>` +
+      `</div>`;
+  }
+
+  async function fetchListPage(url, cursor, key) {
+    const full = cursor ? `${url}?before=${encodeURIComponent(cursor)}` : url;
+    const response = await fetch(full, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    return { items: payload[key] || [], next_cursor: payload.next_cursor || null };
+  }
+
+  function initNodeLists(ctx, nodeId) {
+    const encoded = encodeURIComponent(nodeId);
+    const messagesEl = ctx.body.querySelector('.modal-list[data-list="messages"]');
+    if (messagesEl) {
+      initLazyList(
+        messagesEl,
+        (cursor) => fetchListPage(`/api/nodes/${encoded}/messages`, cursor, "messages"),
+        renderMessageListItem,
+        "No messages from this node stored."
+      );
+    }
+    const framesEl = ctx.body.querySelector('.modal-list[data-list="frames"]');
+    if (framesEl) {
+      initLazyList(
+        framesEl,
+        (cursor) => fetchListPage(`/api/nodes/${encoded}/frames`, cursor, "frames"),
+        renderFrameListItem,
+        "No frames from this node stored yet."
+      );
+    }
+  }
+
+  function renderDetail(node, ctx) {
+    const avatar = ctx.avatar;
+    const titleName = ctx.titleName;
+    const titleSub = ctx.titleSub;
+    const body = ctx.body;
 
     const name = node.long_name || node.short_name || node.node_id || "Unknown node";
     const avatarText = avatarTextFor(node.short_name, node.long_name, node.node_id);
@@ -319,34 +583,27 @@
       else avatar.removeAttribute("style");
     }
 
-    const identity =
-      row("Node ID", node.node_id) +
-      row("Short name", node.short_name) +
-      row("Long name", node.long_name) +
-      row("Hardware", node.hw_model) +
-      row("Role", node.role) +
-      row("MAC address", node.macaddr) +
-      row("Public key", node.public_key);
+    // One block per frame type, each fed by the newest stored frame of that
+    // kind (the v11 migration backfilled snapshot frames for older nodes).
+    // The age chip and every value link to the exact frame they came from;
+    // blocks with no frame render empty and are dropped by renderSections.
+    const latest = node.latest || {};
+    const nodeinfo = latest.nodeinfo || {};
+    const device = latest.device || {};
+    const environment = latest.environment || {};
+    const position = latest.position || {};
+
+    const identityHtml = row("Node ID", node.node_id) +
+      identityRows(nodeinfo.values || {}, nodeinfo.frame_id);
 
     const activity =
       row("First seen", formatTimeWithRelative(node.first_seen)) +
       row("Last seen", formatTimeWithRelative(node.last_seen)) +
       row("Online since", formatTimeWithRelative(node.online_since)) +
       row("Last ping", formatTimeWithRelative(node.last_ping)) +
-      row("Last telemetry", formatTimeWithRelative(node.last_telemetry)) +
-      row("Last position", formatTimeWithRelative(node.last_position)) +
       row("Last hops", formatValue(node.last_hops)) +
       row("SNR (last)", formatValue(node.last_rx_snr)) +
       row("RSSI (last)", formatValueUnit(node.last_rx_rssi, "dBm"));
-
-    const sensors =
-      row("Battery", formatValueUnit(node.battery_level, "%")) +
-      row("Voltage", formatValueUnit(node.battery_voltage, "V")) +
-      row("Channel util", formatValueUnit(node.channel_utilization, "%")) +
-      row("Air util TX", formatValueUnit(node.air_util_tx, "%")) +
-      row("Temperature", formatValueUnit(node.temperature, "°C")) +
-      row("Humidity", formatValueUnit(node.humidity, "%hr")) +
-      row("Pressure", formatValueUnit(node.pressure, "mbar"));
 
     const fmtCount = (t, d) => `${formatValue(t)} total · ${formatValue(d)} today`;
     const counts =
@@ -355,62 +612,132 @@
       row("Position", fmtCount(node.position_count_total, node.position_count_daily)) +
       row("Other", fmtCount(node.other_count_total, node.other_count_daily));
 
-    let position = "";
-    if (node.position && typeof node.position === "object") {
-      const p = node.position;
-      const lat = p.latitude ?? p.latitudeI;
-      const lon = p.longitude ?? p.longitudeI;
-      const alt = p.altitude;
-      const fixTime = p.time ?? p.fixTime;
-      const source = p.locationSource ?? p.location_source;
-      position =
-        row("Latitude", lat) +
-        row("Longitude", lon) +
-        row("Altitude", alt !== undefined ? formatValueUnit(alt, "m") : null) +
-        row("Source", source) +
-        row("Fix time", fixTime ? formatTimeWithRelative(fixTime) : null);
-    }
-
     const sections = [
-      ["Identity", identity],
+      ["Identity", identityHtml, ageChip(nodeinfo.rx_time, nodeinfo.frame_id)],
+      ["Device", deviceRows(device.values || {}, device.frame_id), ageChip(device.rx_time, device.frame_id)],
+      ["Environment", environmentRows(environment.values || {}, environment.frame_id), ageChip(environment.rx_time, environment.frame_id)],
+      ["Position", positionRows(position.values || {}, position.frame_id), ageChip(position.rx_time, position.frame_id)],
       ["Activity", activity],
-      ["Latest sensors", sensors],
       ["Packet counts", counts],
-      ["Position", position],
     ];
 
-    const html = renderSections(sections) + renderJsonSections(
+    const listsHtml =
+      `<div class="modal__section">` +
+      `<h3 class="modal__section-title"><span>Messages</span></h3>` +
+      lazyListHtml("messages") +
+      `</div>` +
+      `<div class="modal__section">` +
+      `<h3 class="modal__section-title"><span>Frames</span></h3>` +
+      lazyListHtml("frames") +
+      `</div>`;
+
+    const html = renderSections(sections) + listsHtml + renderJsonSections(
       node.sections,
       "Raw (from meshtastic, accumulated from diff. packet types)"
     );
 
     if (body) {
       body.innerHTML = html || '<p class="muted">No data recorded for this node yet.</p>';
+      if (node.node_id) initNodeLists(ctx, node.node_id);
     }
   }
 
   async function showNodeModal(nodeId) {
     if (!nodeId) return;
-    openModal(document.getElementById("node-modal"));
-    setModalLoading(nodeId);
+    const ctx = pushModal({ withAvatar: true });
+    setNodeModalLoading(ctx, nodeId);
     try {
       const response = await fetch(`/api/nodes/${encodeURIComponent(nodeId)}`, { cache: "no-store" });
       if (!response.ok) {
-        const body = document.getElementById("node-modal-body");
-        const titleName = document.getElementById("node-modal-name");
-        if (titleName) titleName.textContent = "Node";
-        if (body) {
-          body.innerHTML = response.status === 404
-            ? '<p class="muted">No record for this node yet.</p>'
-            : `<p class="muted">Failed to load node (${response.status}).</p>`;
-        }
+        ctx.titleName.textContent = "Node";
+        ctx.body.innerHTML = response.status === 404
+          ? '<p class="muted">No record for this node yet.</p>'
+          : `<p class="muted">Failed to load node (${response.status}).</p>`;
         return;
       }
       const payload = await response.json();
-      if (payload && payload.node) renderDetail(payload.node);
+      if (payload && payload.node) renderDetail(payload.node, ctx);
     } catch (err) {
-      const body = document.getElementById("node-modal-body");
-      if (body) body.innerHTML = '<p class="muted">Network error loading node.</p>';
+      ctx.body.innerHTML = '<p class="muted">Network error loading node.</p>';
+    }
+  }
+
+  // ---------- Frame modal ----------
+  function renderFrameDetail(frame, ctx) {
+    const type = FRAME_TYPE_LABELS[frame.frame_type] || "Frame";
+    ctx.titleName.textContent = `${type} frame`;
+    ctx.titleSub.textContent = formatTimeWithRelative(frame.rx_time);
+    if (ctx.avatar) {
+      const avatarText = avatarTextFor(frame.short_name, frame.long_name, frame.node_id);
+      ctx.avatar.textContent = avatarText;
+      ctx.avatar.className = avatarLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
+      const style = [];
+      if (frame.avatar_bg) style.push(`background: ${frame.avatar_bg}`);
+      if (frame.avatar_fg) style.push(`color: ${frame.avatar_fg}`);
+      if (style.length) ctx.avatar.setAttribute("style", style.join("; "));
+      else ctx.avatar.removeAttribute("style");
+    }
+
+    const party = {
+      node_id: frame.node_id || null,
+      name: frame.long_name || frame.short_name || frame.node_id || "Unknown node",
+      avatarText: avatarTextFor(frame.short_name, frame.long_name, frame.node_id),
+      avatar_bg: frame.avatar_bg,
+      avatar_fg: frame.avatar_fg,
+    };
+    const senderHtml = `<div class="msg-route">${renderMsgParty(party)}</div>`;
+
+    // Same typed renderers as the node modal blocks, so a reading looks the
+    // same whether seen as "latest value" or inside its frame.
+    const v = frame.values || {};
+    let readings = "";
+    if (frame.frame_type === "telemetry") {
+      readings = deviceRows(v) + environmentRows(v);
+    } else if (frame.frame_type === "position") {
+      readings = positionRows(v);
+    } else if (frame.frame_type === "nodeinfo") {
+      readings = identityRows(v);
+    }
+
+    const reception =
+      row("Received", formatTimeWithRelative(frame.rx_time)) +
+      row("Channel", frame.channel_label) +
+      row("Hops away", formatValue(frame.hops)) +
+      row("RSSI", formatValueUnit(frame.rx_rssi, "dBm")) +
+      row("SNR", formatValueUnit(frame.rx_snr, "dB"));
+
+    const packet =
+      row("Mesh packet id", frame.packet_id) +
+      row("Port", frame.portnum);
+
+    const sections = [
+      ["Readings", readings],
+      ["Reception", reception],
+      ["Packet", packet],
+    ];
+
+    ctx.body.innerHTML = senderHtml + renderSections(sections) +
+      renderJsonSections(frame.sections);
+  }
+
+  async function showFrameModal(frameId) {
+    if (frameId === null || frameId === undefined || frameId === "") return;
+    const ctx = pushModal({ withAvatar: true });
+    ctx.titleName.textContent = "Loading…";
+    ctx.body.innerHTML = '<p class="muted">Fetching frame details…</p>';
+    try {
+      const response = await fetch(`/api/frames/${encodeURIComponent(frameId)}`, { cache: "no-store" });
+      if (!response.ok) {
+        ctx.titleName.textContent = "Frame";
+        ctx.body.innerHTML = response.status === 404
+          ? '<p class="muted">No record for this frame.</p>'
+          : `<p class="muted">Failed to load frame (${response.status}).</p>`;
+        return;
+      }
+      const payload = await response.json();
+      if (payload && payload.frame) renderFrameDetail(payload.frame, ctx);
+    } catch (err) {
+      ctx.body.innerHTML = '<p class="muted">Network error loading frame.</p>';
     }
   }
 
@@ -421,11 +748,9 @@
     return "Text message";
   }
 
-  function setMessageModalLoading() {
-    const titleName = document.getElementById("message-modal-name");
-    const body = document.getElementById("message-modal-body");
-    if (titleName) titleName.textContent = "Loading…";
-    if (body) body.innerHTML = '<p class="muted">Fetching message details…</p>';
+  function setMessageModalLoading(ctx) {
+    ctx.titleName.textContent = "Loading…";
+    ctx.body.innerHTML = '<p class="muted">Fetching message details…</p>';
   }
 
   function isBroadcastTarget(toId) {
@@ -544,13 +869,14 @@
     return `<div class="msg-content">` + textHtml + `</div>`;
   }
 
-  function renderMessageDetail(message) {
-    const titleName = document.getElementById("message-modal-name");
-    const body = document.getElementById("message-modal-body");
+  function renderMessageDetail(message, ctx) {
+    const titleName = ctx.titleName;
+    const body = ctx.body;
 
     const sender = senderParty(message);
 
     if (titleName) titleName.textContent = messageKind(message);
+    ctx.titleSub.textContent = formatTimeWithRelative(message.rx_time);
 
     const decoded = message.decoded || {};
     const raw = message.raw || {};
@@ -622,37 +948,29 @@
 
   async function showMessageModal(messageId) {
     if (messageId === null || messageId === undefined || messageId === "") return;
-    openModal(document.getElementById("message-modal"));
-    setMessageModalLoading();
+    const ctx = pushModal({});
+    setMessageModalLoading(ctx);
     try {
       const response = await fetch(`/api/message/${encodeURIComponent(messageId)}`, { cache: "no-store" });
-      const titleName = document.getElementById("message-modal-name");
-      const body = document.getElementById("message-modal-body");
       if (!response.ok) {
-        if (titleName) titleName.textContent = "Message";
-        if (body) {
-          body.innerHTML = response.status === 404
-            ? '<p class="muted">No record for this message.</p>'
-            : `<p class="muted">Failed to load message (${response.status}).</p>`;
-        }
+        ctx.titleName.textContent = "Message";
+        ctx.body.innerHTML = response.status === 404
+          ? '<p class="muted">No record for this message.</p>'
+          : `<p class="muted">Failed to load message (${response.status}).</p>`;
         return;
       }
       const payload = await response.json();
-      if (payload && payload.message) renderMessageDetail(payload.message);
+      if (payload && payload.message) renderMessageDetail(payload.message, ctx);
     } catch (err) {
-      const body = document.getElementById("message-modal-body");
-      if (body) body.innerHTML = '<p class="muted">Network error loading message.</p>';
+      ctx.body.innerHTML = '<p class="muted">Network error loading message.</p>';
     }
   }
 
   // ---------- Channel modal ----------
-  function setChannelModalLoading(channelKey) {
-    const titleName = document.getElementById("channel-modal-name");
-    const titleSub = document.getElementById("channel-modal-sub");
-    const body = document.getElementById("channel-modal-body");
-    if (titleName) titleName.textContent = "Loading…";
-    if (titleSub) titleSub.textContent = "";
-    if (body) body.innerHTML = '<p class="muted">Fetching channel details…</p>';
+  function setChannelModalLoading(ctx) {
+    ctx.titleName.textContent = "Loading…";
+    ctx.titleSub.textContent = "";
+    ctx.body.innerHTML = '<p class="muted">Fetching channel details…</p>';
   }
 
   // A wider "key" row: the PSK is shown in a selectable monospace block so it
@@ -663,10 +981,10 @@
       `<dd><code class="channel-key">${escapeHtml(String(value))}</code></dd>`;
   }
 
-  function renderChannelDetail(channel) {
-    const titleName = document.getElementById("channel-modal-name");
-    const titleSub = document.getElementById("channel-modal-sub");
-    const body = document.getElementById("channel-modal-body");
+  function renderChannelDetail(channel, ctx) {
+    const titleName = ctx.titleName;
+    const titleSub = ctx.titleSub;
+    const body = ctx.body;
 
     if (titleName) titleName.textContent = channel.display_name || "Channel";
     if (titleSub) {
@@ -726,41 +1044,25 @@
 
   async function showChannelModal(channelKey) {
     if (channelKey === null || channelKey === undefined || channelKey === "") return;
-    openModal(document.getElementById("channel-modal"));
-    setChannelModalLoading(channelKey);
+    const ctx = pushModal({});
+    setChannelModalLoading(ctx);
     try {
       const response = await fetch(`/api/channels/${encodeURIComponent(channelKey)}`, { cache: "no-store" });
-      const titleName = document.getElementById("channel-modal-name");
-      const body = document.getElementById("channel-modal-body");
       if (!response.ok) {
-        if (titleName) titleName.textContent = "Channel";
-        if (body) body.innerHTML = `<p class="muted">Failed to load channel (${response.status}).</p>`;
+        ctx.titleName.textContent = "Channel";
+        ctx.body.innerHTML = `<p class="muted">Failed to load channel (${response.status}).</p>`;
         return;
       }
       const payload = await response.json();
-      if (payload && payload.channel) renderChannelDetail(payload.channel);
+      if (payload && payload.channel) renderChannelDetail(payload.channel, ctx);
     } catch (err) {
-      const body = document.getElementById("channel-modal-body");
-      if (body) body.innerHTML = '<p class="muted">Network error loading channel.</p>';
+      ctx.body.innerHTML = '<p class="muted">Network error loading channel.</p>';
     }
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    const modals = [
-      document.getElementById("node-modal"),
-      document.getElementById("message-modal"),
-      document.getElementById("channel-modal"),
-    ];
-    modals.forEach(function (modal) {
-      if (!modal) return;
-      modal.addEventListener("click", function (event) {
-        if (event.target === modal) closeModal(modal);
-      });
-      const close = modal.querySelector(".modal__close");
-      if (close) close.addEventListener("click", function () { closeModal(modal); });
-    });
     document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape" && openModalEl) closeModal(openModalEl);
+      if (event.key === "Escape" && modalStack.length) popModal();
     });
 
     // Delegated click handling so dynamically-rendered rows work too
@@ -784,6 +1086,20 @@
       if (quote) {
         event.preventDefault();
         showMessageModal(quote.dataset.messageId);
+        return;
+      }
+      // Age chips, value links and frame list items all point at a stored
+      // frame; message list items at a stored message.
+      const frameRef = event.target.closest("[data-frame-id]");
+      if (frameRef) {
+        event.preventDefault();
+        showFrameModal(frameRef.dataset.frameId);
+        return;
+      }
+      const listMessage = event.target.closest(".list-item[data-message-id]");
+      if (listMessage) {
+        event.preventDefault();
+        showMessageModal(listMessage.dataset.messageId);
         return;
       }
       const tapback = event.target.closest(".tapback[data-message-id]");
@@ -826,6 +1142,7 @@
     showNodeModal,
     showMessageModal,
     showChannelModal,
+    showFrameModal,
     isLive,
     LIVE_THRESHOLD_SECONDS,
   };
