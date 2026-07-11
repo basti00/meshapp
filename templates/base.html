@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0f1320" media="(prefers-color-scheme: dark)">
   <title>{% block title %}Meshapp{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script>
     // Set theme before paint to avoid flash.
@@ -39,7 +40,11 @@
   </main>
 
   <!-- Modals are created on demand by app.js and stack as layers on <body>. -->
+  <!-- Leaflet is vendored (the Pi serves everything itself); map tiles still
+       need internet in the browser, markers work without. -->
+  <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='map.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
