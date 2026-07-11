@@ -1,67 +1,24 @@
 {% extends "base.html" %}
 {% block title %}Nodes · Meshapp{% endblock %}
 {% block content %}
-<div class="page-controls">
-  <h1>Nodes</h1>
-  <label class="sort-control">
-    <span>Sort by</span>
-    <select id="node-sort">
-      <option value="last_seen">Last seen</option>
-      <option value="hops">Hops</option>
-    </select>
-  </label>
-</div>
-<div class="card">
-  <div class="table-wrap">
-    <table class="responsive-stack">
-      <thead>
-        <tr>
-          <th>Node</th>
-          <th>Environment</th>
-        </tr>
-      </thead>
-      <tbody id="nodes-body">
-        {% if nodes %}
-          {% for node in nodes %}
-          {% set display_name = node.long_name or node.short_name or node.node_id %}
-          {% set avatar_text_raw = node.short_name or (node.long_name[:2] if node.long_name else (node.node_id[:2] if node.node_id else "?")) %}
-          {% set avatar_text = avatar_text_raw[:4] | upper %}
-          {% set avatar_small = avatar_text | length >= 4 %}
-          {% set live = node.last_seen | is_live %}
-          {% set battery = node.battery_level | battery_info %}
-          {% set subtitle = node | node_subtitle %}
-          {% set environment = node | environment_summary %}
-          <tr>
-            <td class="cell-primary" data-label="Node">
-              <button type="button" class="node-button" data-node-id="{{ node.node_id or '' }}">
-                {% if node.last_seen %}<span class="status-dot{% if live %} status-dot--live{% endif %}" aria-hidden="true"></span>{% endif %}
-                <span class="avatar{% if avatar_small %} avatar--small{% endif %}"
-                      {% if node.avatar_bg or node.avatar_fg %}style="{% if node.avatar_bg %}background: {{ node.avatar_bg }};{% endif %}{% if node.avatar_fg %} color: {{ node.avatar_fg }};{% endif %}"{% endif %}>{{ avatar_text }}</span>
-                <span class="node-button__text">
-                  <span class="node-button__primary">
-                    <span class="node-name">{{ display_name }}</span>
-                    {% if battery %}
-                    <span class="battery {{ battery.css_class }}" aria-label="Battery {{ battery.level }}%">
-                      <span class="battery__icon">
-                        <span class="battery__shell"><span class="battery__fill" style="width: {{ battery.level }}%"></span></span>
-                        <span class="battery__cap"></span>
-                      </span>
-                      <span class="battery__label">{{ battery.level }} %</span>
-                    </span>
-                    {% endif %}
-                  </span>
-                  {% if subtitle %}<span class="node-button__sub">{{ subtitle }}</span>{% endif %}
-                </span>
-              </button>
-            </td>
-            <td class="{% if not environment %}cell-empty{% endif %}" data-label="Environment">{{ environment or "-" }}</td>
-          </tr>
-          {% endfor %}
-        {% else %}
-          <tr><td colspan="2" class="muted">No nodes yet.</td></tr>
-        {% endif %}
-      </tbody>
-    </table>
+<div class="nodes-page">
+  <div class="page-controls">
+    <h1>Nodes</h1>
+    <label class="sort-control">
+      <span>Sort by</span>
+      <select id="node-sort">
+        <option value="last_seen">Last seen</option>
+        <option value="hops">Hops</option>
+      </select>
+    </label>
+  </div>
+  <div class="nodes-layout">
+    <div class="card nodes-list-card">
+      <div class="node-list" id="node-list" aria-label="Known nodes"></div>
+    </div>
+    <div class="card nodes-map-card">
+      <div id="nodes-map" class="nodes-map"></div>
+    </div>
   </div>
 </div>
 {% endblock %}
@@ -69,10 +26,18 @@
 <script>
   (function () {
     const refreshSeconds = {{ auto_refresh_seconds or 0 }};
-    const tbody = document.getElementById("nodes-body");
+    let nodes = {{ nodes | tojson }};
+    const listEl = document.getElementById("node-list");
+    const mapEl = document.getElementById("nodes-map");
     const sortSelect = document.getElementById("node-sort");
-    const { formatMessageTime, formatValue, renderNodeButton, escapeHtml } = window.MeshApp;
+    const { formatMessageTime, renderNodeButton, escapeHtml, showNodeModal } = window.MeshApp;
     const SORT_KEY = "meshapp.nodeSort";
+
+    // Hovering a row highlights its marker immediately, but the map only
+    // pans to an off-screen marker after the pointer has rested on the row
+    // for a moment -- skimming or scrolling through the list must not jerk
+    // the map around.
+    const FLY_DELAY_MS = 500;
 
     let sortMode = "last_seen";
     try {
@@ -84,27 +49,8 @@
       sortSelect.addEventListener("change", function () {
         sortMode = sortSelect.value;
         try { localStorage.setItem(SORT_KEY, sortMode); } catch (e) {}
-        refresh();
+        renderList();
       });
-    }
-
-    function joinMetrics(parts) {
-      const filtered = parts.filter(Boolean);
-      return filtered.length ? filtered.join(" · ") : null;
-    }
-
-    function appendMetric(parts, value, unit) {
-      const formatted = formatValue(value);
-      if (formatted === "-") return;
-      parts.push(`${formatted} ${unit}`);
-    }
-
-    function environmentSummary(node) {
-      const parts = [];
-      appendMetric(parts, node.temperature, "°C");
-      appendMetric(parts, node.humidity, "%hr");
-      appendMetric(parts, node.pressure, "mbar");
-      return joinMetrics(parts);
     }
 
     function nodeSubtitle(node) {
@@ -117,8 +63,8 @@
       return parts.length ? parts.join(" · ") : null;
     }
 
-    function applySort(nodes) {
-      const copy = nodes.slice();
+    function applySort(list) {
+      const copy = list.slice();
       if (sortMode === "hops") {
         copy.sort(function (a, b) {
           const ha = a.last_hops, hb = b.last_hops;
@@ -136,6 +82,10 @@
       return copy;
     }
 
+    const PIN_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">' +
+      '<path d="M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5' +
+      'A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z" fill="currentColor"/></svg>';
+
     function buildRow(node) {
       const btn = renderNodeButton({
         node_id: node.node_id,
@@ -147,32 +97,120 @@
         battery_level: node.battery_level,
         subtitle: nodeSubtitle(node),
       });
-      const environment = environmentSummary(node);
-      const envClass = environment ? "" : "cell-empty";
-      return `
-        <tr>
-          <td class="cell-primary" data-label="Node">${btn}</td>
-          <td class="${envClass}" data-label="Environment">${escapeHtml(environment || "-")}</td>
-        </tr>`;
+      const pin = node.position
+        ? `<span class="node-row__pin" title="Position known">${PIN_SVG}</span>`
+        : "";
+      return `<div class="node-row" data-node-id="${escapeHtml(node.node_id || "")}">${btn}${pin}</div>`;
     }
 
+    let activeId = null;
+
+    function setRowActive(nodeId) {
+      if (activeId === nodeId) return;
+      if (activeId !== null) {
+        const prev = listEl.querySelector(".node-row--active");
+        if (prev) prev.classList.remove("node-row--active");
+      }
+      activeId = nodeId;
+      if (nodeId === null) return;
+      const rowEl = listEl.querySelector(`.node-row[data-node-id="${CSS.escape(nodeId)}"]`);
+      if (rowEl) rowEl.classList.add("node-row--active");
+    }
+
+    function renderList() {
+      const sorted = applySort(nodes);
+      listEl.innerHTML = sorted.length
+        ? sorted.map(buildRow).join("")
+        : '<p class="empty-state">No nodes yet.</p>';
+      const keep = activeId;
+      activeId = null;
+      setRowActive(keep);
+    }
+
+    // ---------- Map ----------
+    let mapView = null;
+    let listHoverArmed = true; // false while a map-driven smooth scroll may
+                               // slide rows under a stationary pointer
+    if (window.MeshMap) {
+      mapView = window.MeshMap.create(mapEl, {
+        onHover: function (nodeId) {
+          setRowActive(nodeId);
+          if (nodeId === null) return;
+          const rowEl = listEl.querySelector(`.node-row[data-node-id="${CSS.escape(nodeId)}"]`);
+          if (rowEl) {
+            listHoverArmed = false;
+            rowEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }
+        },
+        onSelect: function (nodeId) { showNodeModal(nodeId); },
+      });
+      if (mapView) {
+        mapView.setNodes(nodes);
+        mapView.fitAll();
+      }
+    }
+
+    // ---------- List hover -> map ----------
+    let hoveredId = null;
+    let flyTimer = null;
+
+    function handleRowHover(event) {
+      const rowEl = event.target.closest(".node-row");
+      if (!rowEl) return;
+      const nodeId = rowEl.dataset.nodeId;
+      if (!nodeId || nodeId === hoveredId) return;
+      hoveredId = nodeId;
+      setRowActive(nodeId);
+      if (!mapView) return;
+      clearTimeout(flyTimer);
+      if (mapView.hasNode(nodeId)) {
+        mapView.setHighlight(nodeId);
+        flyTimer = setTimeout(function () { mapView.ensureVisible(nodeId); }, FLY_DELAY_MS);
+      } else {
+        mapView.clearHighlight();
+      }
+    }
+
+    // mousemove re-arms and also hover-starts: when the pointer enters a row,
+    // mouseover fires before the re-arming mousemove, so relying on mouseover
+    // alone would swallow the first hover after an auto-scroll.
+    listEl.addEventListener("mousemove", function (event) {
+      listHoverArmed = true;
+      handleRowHover(event);
+    });
+    listEl.addEventListener("mouseover", function (event) {
+      if (listHoverArmed) handleRowHover(event);
+    });
+    listEl.addEventListener("mouseleave", function () {
+      hoveredId = null;
+      clearTimeout(flyTimer);
+      setRowActive(null);
+      if (mapView) mapView.clearHighlight();
+    });
+
+    // Row click opens the node modal; clicks on the inner node button are
+    // already handled by the delegated handler in app.js.
+    listEl.addEventListener("click", function (event) {
+      if (event.target.closest(".node-button")) return;
+      const rowEl = event.target.closest(".node-row");
+      if (rowEl && rowEl.dataset.nodeId) showNodeModal(rowEl.dataset.nodeId);
+    });
+
     async function refresh() {
-      if (!tbody) return;
       try {
         const response = await fetch("/api/nodes", { cache: "no-store" });
         if (!response.ok) return;
         const payload = await response.json();
-        const nodes = applySort(payload.nodes || []);
-        tbody.innerHTML = nodes.length
-          ? nodes.map(buildRow).join("")
-          : '<tr><td colspan="2" class="muted">No nodes yet.</td></tr>';
+        nodes = payload.nodes || [];
+        renderList();
+        if (mapView) mapView.setNodes(nodes);
       } catch (e) {
         console.warn("Failed to refresh nodes", e);
       }
     }
 
+    renderList();
     if (refreshSeconds > 0) setInterval(refresh, refreshSeconds * 1000);
-    refresh();
   })();
 </script>
 {% endblock %}

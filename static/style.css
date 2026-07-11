@@ -1380,3 +1380,209 @@ button.msg-quote:hover .msg-quote__go { color: var(--accent); }
     white-space: nowrap;
   }
 }
+
+/* ---------- Nodes page: list + map split view ---------- */
+/* Same viewport-locking pattern as the messages page: the node list is the
+   only scroller and the map fills the rest of the height. */
+html:has(.nodes-page) { scrollbar-gutter: auto; }
+
+body:has(.nodes-page) {
+  display: flex;
+  flex-direction: column;
+  height: 100svh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body:has(.nodes-page) main {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: 1500px;
+  margin: 0 auto;
+  padding-top: clamp(12px, 3vw, 18px);
+  padding-bottom: clamp(12px, 3vw, 18px);
+  display: flex;
+  flex-direction: column;
+}
+
+.nodes-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.nodes-page .page-controls { flex: 0 0 auto; margin-bottom: 12px; }
+
+.nodes-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr);
+  gap: 14px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.nodes-list-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 6px 0;
+  overflow: hidden;
+}
+
+.node-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.node-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.node-row:last-child { border-bottom: none; }
+.node-row:hover, .node-row--active { background: var(--accent-soft); }
+
+/* The row is the hover/click surface; neutralise the inner button's own box. */
+.node-row .node-button {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+}
+.node-row .node-button:hover { background: none; }
+
+.node-row__pin {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--accent);
+  opacity: 0.55;
+}
+
+.node-row--active .node-row__pin { opacity: 1; }
+
+.nodes-map-card {
+  position: relative;
+  /* Own stacking context: Leaflet's internal panes use z-index 400-800 and
+     would otherwise paint over the modal layers (z-index ~100). */
+  z-index: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Leaflet needs an explicitly sized container. */
+.nodes-map { position: absolute; inset: 0; }
+
+/* Stack on small screens: map on top (fixed share), list scrolls below. */
+@media (max-width: 800px) {
+  .nodes-layout { display: flex; flex-direction: column; }
+  .nodes-map-card { order: -1; flex: 0 0 42vh; }
+  .nodes-list-card { flex: 1 1 auto; }
+}
+
+/* ---------- Map component (nodes page + location modal) ---------- */
+.leaflet-container {
+  font-family: var(--font-main);
+  background: #d5dae2;
+}
+
+[data-theme="dark"] .leaflet-container { background: #10141f; }
+
+/* Dark theme: invert the OSM raster tiles into a dark basemap. */
+[data-theme="dark"] .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9) saturate(0.6);
+}
+
+/* Theme the Leaflet controls like our panels. */
+.leaflet-bar a,
+.leaflet-control-attribution {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.leaflet-bar a { border-bottom-color: var(--border); }
+.leaflet-bar a:hover, .leaflet-bar a:focus { background: var(--panel-hover); color: var(--text); }
+.leaflet-bar a.leaflet-disabled { background: var(--panel); color: var(--muted); }
+
+.leaflet-control-attribution {
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.leaflet-control-attribution a { color: var(--muted); }
+
+/* Marker: the node's avatar circle with its name chip underneath. The
+   divIcon box is the 32px avatar; the name hangs below, centred. */
+.map-marker { background: none; border: none; }
+
+.map-marker .avatar {
+  width: 32px;
+  height: 32px;
+  box-shadow: 0 0 0 2px var(--panel), 0 2px 6px rgba(16, 24, 40, 0.35);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.map-marker__name {
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.map-marker--active .avatar {
+  transform: scale(1.22);
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent), 0 4px 10px rgba(16, 24, 40, 0.45);
+}
+
+.map-marker--active .map-marker__name {
+  border-color: var(--accent);
+  background: var(--panel);
+}
+
+/* Low-contrast circle showing the highlighted node's position uncertainty
+   (from Meshtastic precision_bits). Class styles beat the SVG presentation
+   attributes Leaflet sets from its path options. */
+.map-uncertainty {
+  stroke: var(--accent);
+  stroke-opacity: 0.35;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 5;
+  fill: var(--accent);
+  fill-opacity: 0.08;
+}
+
+/* Location modal: a wider modal whose body is just the windowed map. */
+.modal--map { width: min(720px, 100%); }
+
+.modal--map .modal__body { padding: 12px; }
+
+.modal-map {
+  position: relative;
+  z-index: 0; /* contain Leaflet's high-z panes (see .nodes-map-card) */
+  height: min(420px, 58vh);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}

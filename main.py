@@ -18,7 +18,6 @@ DEVICE_PATH = os.environ.get("MESH_DEVICE", "/dev/ttyACM0")
 DEFAULT_CHANNEL_INDEX = int(os.environ.get("MESH_CHANNEL", "0"))
 AUTO_REFRESH_SECONDS = int(os.environ.get("MESH_AUTO_REFRESH", "10"))
 LISTEN_RETRY_SECONDS = 5
-LIVE_THRESHOLD_SECONDS = 120 * 60
 
 PING_KEYWORDS = ("PING",)
 
@@ -73,15 +72,6 @@ def _format_message_time(value):
     return dt.strftime("%d.%m.%Y %H:%M")
 
 
-def _is_live(value):
-    if not value:
-        return False
-    try:
-        return (time.time() - int(value)) <= LIVE_THRESHOLD_SECONDS
-    except (TypeError, ValueError):
-        return False
-
-
 def _join_metrics(parts):
     rendered = [p for p in parts if p]
     return " · ".join(rendered) if rendered else None
@@ -93,43 +83,6 @@ def _battery_summary(node):
         parts.append(f"{_format_value(node['battery_voltage'])} V")
     if node.get("battery_level") is not None:
         parts.append(f"{_format_value(node['battery_level'])} %")
-    return _join_metrics(parts)
-
-
-def _battery_info(level):
-    if level is None:
-        return None
-    try:
-        lvl = int(round(float(level)))
-    except (TypeError, ValueError):
-        return None
-    lvl = max(0, min(lvl, 100))
-    if lvl <= 20:
-        css_class = "battery--low"
-    elif lvl <= 50:
-        css_class = "battery--medium"
-    else:
-        css_class = "battery--high"
-    return {"level": lvl, "css_class": css_class}
-
-
-def _node_subtitle(node):
-    parts = []
-    if node.get("last_seen"):
-        parts.append(f"Last seen {_format_message_time(node['last_seen'])}")
-    hops = node.get("last_hops")
-    if hops is not None:
-        label = "hop" if int(hops) == 1 else "hops"
-        parts.append(f"{int(hops)} {label}")
-    return " · ".join(parts) if parts else None
-
-
-def _environment_summary(node):
-    parts = []
-    for key, unit in (("temperature", "°C"), ("humidity", "%hr"), ("pressure", "mbar")):
-        formatted = _format_value(node.get(key))
-        if formatted != "-":
-            parts.append(f"{formatted} {unit}")
     return _join_metrics(parts)
 
 
@@ -941,6 +894,19 @@ def _extract_position(decoded):
     return None
 
 
+def _position_uncertainty_m(precision_bits):
+    """Radius (m) within which the true position lies. Meshtastic reduces
+    location precision by keeping only the top `precision_bits` of the 32-bit
+    integer lat/lon and placing the reported point randomly inside that
+    window, so the uncertainty radius is half the window: 2^(32-bits) *
+    1e-7 deg * ~111.32 km/deg / 2 (matches the official table, e.g. 16 bits
+    -> ±364.8 m). Full precision (>=32) and unknown/never (0) yield None."""
+    bits = _coerce_int(precision_bits)
+    if bits is None or bits <= 0 or bits >= 32:
+        return None
+    return round((1 << (32 - bits)) * 1e-7 * 111319.5 / 2, 1)
+
+
 def _position_values(position):
     """Normalise a decoded position payload into display fields (integer
     latitudeI/longitudeI fall back to degrees when the float form is absent)."""
@@ -957,12 +923,14 @@ def _position_values(position):
                 return scaled * 1e-7
         return None
 
+    precision_bits = position.get("precisionBits") or position.get("precision_bits")
     return {
         "latitude": _degrees("latitude", ("latitudeI", "latitude_i")),
         "longitude": _degrees("longitude", ("longitudeI", "longitude_i")),
         "altitude": position.get("altitude"),
         "sats_in_view": position.get("satsInView") or position.get("sats_in_view"),
-        "precision_bits": position.get("precisionBits") or position.get("precision_bits"),
+        "precision_bits": precision_bits,
+        "uncertainty_m": _position_uncertainty_m(precision_bits),
         "location_source": position.get("locationSource") or position.get("location_source"),
         "fix_time": position.get("time") or position.get("fixTime"),
     }
@@ -1519,28 +1487,40 @@ def message_detail_api(message_id):
     return jsonify({"message": message})
 
 
-@app.route("/nodes")
-def nodes():
-    with _db_connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT *
-            FROM nodes
-            ORDER BY last_seen DESC
-            """
-        ).fetchall()
-    node_list = [dict(row) for row in rows]
-    for node in node_list:
-        node.update(_node_avatar_colors(node.get("node_id")))
-    return render_template(
-        "nodes.html",
-        nodes=node_list,
-        auto_refresh_seconds=AUTO_REFRESH_SECONDS,
-    )
+def _latest_positions(conn):
+    """Newest stored position frame per node, keyed by node id, reduced to
+    what the map needs. Relies on SQLite's documented bare-column semantics
+    with a lone MAX(): the non-aggregate columns come from the max-rx_time
+    row. Positions without usable coordinates (or the 0,0 null island the
+    firmware reports before a fix) are dropped."""
+    rows = conn.execute(
+        """
+        SELECT node_id, id, payload_json, MAX(rx_time) AS rx_time
+        FROM frames
+        WHERE frame_type = 'position'
+        GROUP BY node_id
+        """
+    ).fetchall()
+    positions = {}
+    for row in rows:
+        values = _position_values(_safe_json_loads(row["payload_json"]))
+        lat, lon = values.get("latitude"), values.get("longitude")
+        if lat is None or lon is None or (not lat and not lon):
+            continue
+        positions[row["node_id"]] = {
+            "latitude": lat,
+            "longitude": lon,
+            "precision_bits": values.get("precision_bits"),
+            "uncertainty_m": values.get("uncertainty_m"),
+            "frame_id": row["id"],
+            "rx_time": row["rx_time"],
+        }
+    return positions
 
 
-@app.route("/api/nodes")
-def nodes_api():
+def _node_list_payload():
+    """Node rows for the nodes page and /api/nodes, each carrying its latest
+    known position (or None) for the map."""
     with _db_connect() as conn:
         rows = conn.execute(
             """
@@ -1569,10 +1549,26 @@ def nodes_api():
             ORDER BY last_seen DESC
             """
         ).fetchall()
+        positions = _latest_positions(conn)
     node_list = [dict(row) for row in rows]
     for node in node_list:
         node.update(_node_avatar_colors(node.get("node_id")))
-    return jsonify({"nodes": node_list})
+        node["position"] = positions.get(node.get("node_id"))
+    return node_list
+
+
+@app.route("/nodes")
+def nodes():
+    return render_template(
+        "nodes.html",
+        nodes=_node_list_payload(),
+        auto_refresh_seconds=AUTO_REFRESH_SECONDS,
+    )
+
+
+@app.route("/api/nodes")
+def nodes_api():
+    return jsonify({"nodes": _node_list_payload()})
 
 
 # Field membership for a node's on-demand combined JSON (see _MSG_DERIVED_KEYS).
@@ -1846,11 +1842,7 @@ app.jinja_env.filters["datetime"] = _format_time
 app.jinja_env.filters["message_time"] = _format_message_time
 app.jinja_env.filters["value"] = _format_value
 app.jinja_env.filters["value_unit"] = _format_value_unit
-app.jinja_env.filters["is_live"] = _is_live
 app.jinja_env.filters["battery_summary"] = _battery_summary
-app.jinja_env.filters["environment_summary"] = _environment_summary
-app.jinja_env.filters["battery_info"] = _battery_info
-app.jinja_env.filters["node_subtitle"] = _node_subtitle
 
 
 if __name__ == "__main__":

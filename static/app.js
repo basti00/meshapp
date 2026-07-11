@@ -435,12 +435,54 @@
       row("Pressure", formatValueUnit(v.pressure, "mbar"), frameId);
   }
 
-  function positionRows(v, frameId) {
-    return row("Latitude", formatCoord(v.latitude), frameId) +
-      row("Longitude", formatCoord(v.longitude), frameId) +
+  // "±365 m" / "±2.9 km" for the position-uncertainty radius derived from
+  // Meshtastic's precision_bits (computed server-side, see
+  // _position_uncertainty_m in main.py).
+  function formatUncertainty(meters) {
+    const n = Number(meters);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    if (n >= 1000) return `±${(n / 1000).toFixed(1)} km`;
+    return `±${Math.round(n)} m`;
+  }
+
+  // "lat, lon" as a click-through to the location map modal. mapNode gives
+  // the node identity shown on the map; without it (or without Leaflet) the
+  // coordinates render as plain text.
+  function locationRow(v, mapNode) {
+    if (v.latitude === null || v.latitude === undefined ||
+        v.longitude === null || v.longitude === undefined) return "";
+    const text = `${formatCoord(v.latitude)}, ${formatCoord(v.longitude)}`;
+    if (!mapNode || !window.MeshMap || !window.L) return row("Location", text);
+    const target = {
+      node: {
+        node_id: mapNode.node_id || null,
+        short_name: mapNode.short_name || null,
+        long_name: mapNode.long_name || null,
+        avatar_bg: mapNode.avatar_bg || null,
+        avatar_fg: mapNode.avatar_fg || null,
+      },
+      position: {
+        latitude: v.latitude,
+        longitude: v.longitude,
+        precision_bits: v.precision_bits !== undefined ? v.precision_bits : null,
+        uncertainty_m: v.uncertainty_m !== undefined ? v.uncertainty_m : null,
+      },
+    };
+    return rowHtml("Location",
+      `<button type="button" class="value-link map-link" ` +
+      `data-map-target="${escapeHtml(JSON.stringify(target))}" ` +
+      `title="Show on map">${escapeHtml(text)}</button>`);
+  }
+
+  function positionRows(v, frameId, mapNode) {
+    const precision = v.precision_bits !== null && v.precision_bits !== undefined
+      ? `${formatValue(v.precision_bits)} bits`
+      : null;
+    return locationRow(v, mapNode) +
       row("Altitude", formatValueUnit(v.altitude, "m"), frameId) +
       row("Satellites", formatValue(v.sats_in_view), frameId) +
-      row("Precision", formatValue(v.precision_bits), frameId) +
+      row("Precision", precision, frameId) +
+      row("Uncertainty", formatUncertainty(v.uncertainty_m), frameId) +
       row("Source", v.location_source, frameId) +
       row("Fix time", v.fix_time ? formatTimeWithRelative(v.fix_time) : null, frameId);
   }
@@ -616,7 +658,7 @@
       ["Identity", identityHtml, ageChip(nodeinfo.rx_time, nodeinfo.frame_id)],
       ["Device", deviceRows(device.values || {}, device.frame_id), ageChip(device.rx_time, device.frame_id)],
       ["Environment", environmentRows(environment.values || {}, environment.frame_id), ageChip(environment.rx_time, environment.frame_id)],
-      ["Position", positionRows(position.values || {}, position.frame_id), ageChip(position.rx_time, position.frame_id)],
+      ["Position", positionRows(position.values || {}, position.frame_id, node), ageChip(position.rx_time, position.frame_id)],
       ["Activity", activity],
       ["Packet counts", counts],
     ];
@@ -694,7 +736,7 @@
     if (frame.frame_type === "telemetry") {
       readings = deviceRows(v) + environmentRows(v);
     } else if (frame.frame_type === "position") {
-      readings = positionRows(v);
+      readings = positionRows(v, undefined, frame);
     } else if (frame.frame_type === "nodeinfo") {
       readings = identityRows(v);
     }
@@ -739,6 +781,52 @@
     } catch (err) {
       ctx.body.innerHTML = '<p class="muted">Network error loading frame.</p>';
     }
+  }
+
+  // ---------- Location map modal ----------
+  // Small windowed map opened from the coordinates in a node/frame modal.
+  // The clicked node is pinned at the exact coordinates that were clicked
+  // (which may come from an old frame); the rest of the mesh loads in as
+  // context and clicking any marker opens that node's modal on top.
+  function showLocationModal(target) {
+    if (!target || !target.node || !target.position || !window.MeshMap) return;
+    const node = target.node;
+    const position = target.position;
+    const ctx = pushModal({ withAvatar: true });
+    ctx.modal.classList.add("modal--map");
+    ctx.titleName.textContent = node.long_name || node.short_name || node.node_id || "Location";
+    const uncertainty = formatUncertainty(position.uncertainty_m);
+    ctx.titleSub.textContent =
+      `${formatCoord(position.latitude)}, ${formatCoord(position.longitude)}` +
+      (uncertainty ? ` (${uncertainty})` : "");
+    if (ctx.avatar) {
+      const avatarText = avatarTextFor(node.short_name, node.long_name, node.node_id);
+      ctx.avatar.textContent = avatarText;
+      ctx.avatar.className = avatarLength(avatarText) >= 4 ? "avatar avatar--small" : "avatar";
+      const style = [];
+      if (node.avatar_bg) style.push(`background: ${node.avatar_bg}`);
+      if (node.avatar_fg) style.push(`color: ${node.avatar_fg}`);
+      if (style.length) ctx.avatar.setAttribute("style", style.join("; "));
+      else ctx.avatar.removeAttribute("style");
+    }
+    ctx.body.innerHTML = '<div class="modal-map"></div>';
+    const view = window.MeshMap.create(ctx.body.querySelector(".modal-map"), {
+      fixed: { node, position },
+      onSelect: showNodeModal,
+    });
+    if (!view) return;
+    // Re-measure once the modal's pop-in animation settles, then load the
+    // rest of the mesh as context markers.
+    setTimeout(function () {
+      view.invalidateSize();
+      view.focusFixed();
+    }, 200);
+    fetch("/api/nodes", { cache: "no-store" })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (payload) {
+        if (payload && payload.nodes) view.setNodes(payload.nodes);
+      })
+      .catch(function () {});
   }
 
   // ---------- Message modal ----------
@@ -1086,6 +1174,14 @@
       if (quote) {
         event.preventDefault();
         showMessageModal(quote.dataset.messageId);
+        return;
+      }
+      const mapLink = event.target.closest(".map-link[data-map-target]");
+      if (mapLink) {
+        event.preventDefault();
+        try {
+          showLocationModal(JSON.parse(mapLink.dataset.mapTarget));
+        } catch (e) { /* malformed payload: ignore */ }
         return;
       }
       // Age chips, value links and frame list items all point at a stored
