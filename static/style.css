@@ -325,6 +325,21 @@ tbody tr:hover { background: var(--panel-hover); }
 
 .page-controls h1 { margin: 0; }
 
+.page-controls__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.node-count {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
 .sort-control {
   display: inline-flex;
   align-items: center;
