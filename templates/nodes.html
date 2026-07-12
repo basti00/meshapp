@@ -3,14 +3,29 @@
 {% block content %}
 <div class="nodes-page">
   <div class="page-controls">
-    <h1>Nodes</h1>
-    <label class="sort-control">
-      <span>Sort by</span>
-      <select id="node-sort">
-        <option value="last_seen">Last seen</option>
-        <option value="hops">Hops</option>
-      </select>
-    </label>
+    <h1>Nodes <span class="node-count" id="node-count"></span></h1>
+    <div class="page-controls__group">
+      <label class="sort-control">
+        <span>Filter</span>
+        <select id="node-filter">
+          <option value="all">No filter</option>
+          <option value="online">Online</option>
+          <option value="online-24h">Online last 24h</option>
+          <option value="messaged">Sent a message</option>
+          <option value="direct">Direct</option>
+          <option value="hops-1">1 hop or less</option>
+          <option value="hops-2">2 hops or less</option>
+          <option value="hops-3">3 hops or less</option>
+        </select>
+      </label>
+      <label class="sort-control">
+        <span>Sort by</span>
+        <select id="node-sort">
+          <option value="last_seen">Last seen</option>
+          <option value="hops">Hops</option>
+        </select>
+      </label>
+    </div>
   </div>
   <div class="nodes-layout">
     <div class="card nodes-list-card">
@@ -30,8 +45,11 @@
     const listEl = document.getElementById("node-list");
     const mapEl = document.getElementById("nodes-map");
     const sortSelect = document.getElementById("node-sort");
+    const filterSelect = document.getElementById("node-filter");
+    const countEl = document.getElementById("node-count");
     const { formatMessageTime, renderNodeButton, escapeHtml, showNodeModal } = window.MeshApp;
     const SORT_KEY = "meshapp.nodeSort";
+    const FILTER_KEY = "meshapp.nodeFilter";
 
     // Hovering highlights the counterpart immediately, but the *viewport*
     // follows only after the pointer has rested for a moment: skimming rows
@@ -52,6 +70,66 @@
         try { localStorage.setItem(SORT_KEY, sortMode); } catch (e) {}
         renderList();
       });
+    }
+
+    // Each filter is a predicate plus the wording for the "x of y ..." count
+    // shown next to the title. "Online" mirrors the Meshtastic apps' 2-hour
+    // window; hop filters need a known hop count to match.
+    function hopsAtMost(max) {
+      return function (node) {
+        const hops = node.last_hops;
+        return hops !== null && hops !== undefined && Number(hops) <= max;
+      };
+    }
+    const FILTERS = {
+      "all": { count: "nodes", test: function () { return true; } },
+      "online": {
+        count: "online",
+        test: function (node, now) { return node.last_seen && now - node.last_seen <= 2 * 3600; },
+      },
+      "online-24h": {
+        count: "online last 24h",
+        test: function (node, now) { return node.last_seen && now - node.last_seen <= 24 * 3600; },
+      },
+      "messaged": {
+        count: "sent a message",
+        test: function (node) { return node.last_message !== null && node.last_message !== undefined; },
+      },
+      "direct": { count: "direct", test: hopsAtMost(0) },
+      "hops-1": { count: "within 1 hop", test: hopsAtMost(1) },
+      "hops-2": { count: "within 2 hops", test: hopsAtMost(2) },
+      "hops-3": { count: "within 3 hops", test: hopsAtMost(3) },
+    };
+
+    let filterMode = "online-24h";
+    try {
+      const savedFilter = localStorage.getItem(FILTER_KEY);
+      if (savedFilter && FILTERS[savedFilter]) filterMode = savedFilter;
+    } catch (e) {}
+    if (filterSelect) {
+      filterSelect.value = filterMode;
+      filterSelect.addEventListener("change", function () {
+        filterMode = filterSelect.value;
+        try { localStorage.setItem(FILTER_KEY, filterMode); } catch (e) {}
+        renderList();
+        // Picking a filter is a deliberate "show me these nodes" -- reframe
+        // the map around the new set (sort changes and refreshes never do).
+        if (mapView) mapView.fitAll();
+      });
+    }
+
+    function applyFilter(list) {
+      const now = Math.floor(Date.now() / 1000);
+      const filter = FILTERS[filterMode] || FILTERS["all"];
+      return list.filter(function (node) { return filter.test(node, now); });
+    }
+
+    function updateCount(shown, total) {
+      if (!countEl) return;
+      const filter = FILTERS[filterMode] || FILTERS["all"];
+      countEl.textContent = filterMode === "all"
+        ? `${total} ${filter.count}`
+        : `${shown} of ${total} ${filter.count}`;
     }
 
     function nodeSubtitle(node) {
@@ -118,11 +196,16 @@
       if (rowEl) rowEl.classList.add("node-row--active");
     }
 
+    // Renders the list *and* pushes the same filtered set to the map, so both
+    // panes always show identical nodes.
     function renderList() {
-      const sorted = applySort(nodes);
+      const filtered = applyFilter(nodes);
+      const sorted = applySort(filtered);
       listEl.innerHTML = sorted.length
         ? sorted.map(buildRow).join("")
-        : '<p class="empty-state">No nodes yet.</p>';
+        : `<p class="empty-state">${nodes.length ? "No nodes match this filter." : "No nodes yet."}</p>`;
+      updateCount(filtered.length, nodes.length);
+      if (mapView) mapView.setNodes(filtered);
       const keep = activeId;
       activeId = null;
       setRowActive(keep);
@@ -160,10 +243,8 @@
         },
         onSelect: function (nodeId) { showNodeModal(nodeId); },
       });
-      if (mapView) {
-        mapView.setNodes(nodes);
-        mapView.fitAll();
-      }
+      // Markers arrive via renderList() below, which feeds the map the same
+      // filtered set as the list before the initial fitAll().
     }
 
     // ---------- List hover -> map ----------
@@ -233,13 +314,13 @@
         const payload = await response.json();
         nodes = payload.nodes || [];
         renderList();
-        if (mapView) mapView.setNodes(nodes);
       } catch (e) {
         console.warn("Failed to refresh nodes", e);
       }
     }
 
     renderList();
+    if (mapView) mapView.fitAll();
     if (refreshSeconds > 0) setInterval(refresh, refreshSeconds * 1000);
   })();
 </script>

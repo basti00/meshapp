@@ -1518,6 +1518,19 @@ def _latest_positions(conn):
     return positions
 
 
+def _latest_message_times(conn):
+    """node_id -> rx_time of the newest chat message sent by that node."""
+    rows = conn.execute(
+        """
+        SELECT from_id, MAX(rx_time) AS last_message
+        FROM messages
+        WHERE from_id IS NOT NULL
+        GROUP BY from_id
+        """
+    ).fetchall()
+    return {row["from_id"]: row["last_message"] for row in rows}
+
+
 def _node_list_payload():
     """Node rows for the nodes page and /api/nodes, each carrying its latest
     known position (or None) for the map."""
@@ -1550,10 +1563,12 @@ def _node_list_payload():
             """
         ).fetchall()
         positions = _latest_positions(conn)
+        message_times = _latest_message_times(conn)
     node_list = [dict(row) for row in rows]
     for node in node_list:
         node.update(_node_avatar_colors(node.get("node_id")))
         node["position"] = positions.get(node.get("node_id"))
+        node["last_message"] = message_times.get(node.get("node_id"))
     return node_list
 
 
