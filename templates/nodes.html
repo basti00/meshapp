@@ -33,11 +33,12 @@
     const { formatMessageTime, renderNodeButton, escapeHtml, showNodeModal } = window.MeshApp;
     const SORT_KEY = "meshapp.nodeSort";
 
-    // Hovering a row highlights its marker immediately, but the map only
-    // pans to an off-screen marker after the pointer has rested on the row
-    // for a moment -- skimming or scrolling through the list must not jerk
-    // the map around.
-    const FLY_DELAY_MS = 500;
+    // Hovering highlights the counterpart immediately, but the *viewport*
+    // follows only after the pointer has rested for a moment: skimming rows
+    // must not jerk the map around, and sweeping the pointer across markers
+    // must not jerk the list. Deliberate actions (pin button, marker tap)
+    // skip the delay.
+    const REST_DELAY_MS = 500;
 
     let sortMode = "last_seen";
     try {
@@ -98,7 +99,7 @@
         subtitle: nodeSubtitle(node),
       });
       const pin = node.position
-        ? `<span class="node-row__pin" title="Position known">${PIN_SVG}</span>`
+        ? `<button type="button" class="node-row__pin" title="Show on map" aria-label="Show on map">${PIN_SVG}</button>`
         : "";
       return `<div class="node-row" data-node-id="${escapeHtml(node.node_id || "")}">${btn}${pin}</div>`;
     }
@@ -131,16 +132,31 @@
     let mapView = null;
     let listHoverArmed = true; // false while a map-driven smooth scroll may
                                // slide rows under a stationary pointer
+    let listScrollTimer = null;
+
+    function scrollRowIntoView(nodeId) {
+      const rowEl = listEl.querySelector(`.node-row[data-node-id="${CSS.escape(nodeId)}"]`);
+      if (rowEl) {
+        listHoverArmed = false;
+        rowEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }
+
     if (window.MeshMap) {
       mapView = window.MeshMap.create(mapEl, {
         onHover: function (nodeId) {
           setRowActive(nodeId);
+          clearTimeout(listScrollTimer);
           if (nodeId === null) return;
-          const rowEl = listEl.querySelector(`.node-row[data-node-id="${CSS.escape(nodeId)}"]`);
-          if (rowEl) {
-            listHoverArmed = false;
-            rowEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          }
+          listScrollTimer = setTimeout(function () { scrollRowIntoView(nodeId); }, REST_DELAY_MS);
+        },
+        // First tap on a not-yet-highlighted marker (touch flow): mirror the
+        // highlight into the list right away -- a tap is deliberate, so no
+        // rest delay.
+        onHighlight: function (nodeId) {
+          setRowActive(nodeId);
+          clearTimeout(listScrollTimer);
+          scrollRowIntoView(nodeId);
         },
         onSelect: function (nodeId) { showNodeModal(nodeId); },
       });
@@ -165,7 +181,7 @@
       clearTimeout(flyTimer);
       if (mapView.hasNode(nodeId)) {
         mapView.setHighlight(nodeId);
-        flyTimer = setTimeout(function () { mapView.ensureVisible(nodeId); }, FLY_DELAY_MS);
+        flyTimer = setTimeout(function () { mapView.ensureVisible(nodeId); }, REST_DELAY_MS);
       } else {
         mapView.clearHighlight();
       }
@@ -189,8 +205,22 @@
     });
 
     // Row click opens the node modal; clicks on the inner node button are
-    // already handled by the delegated handler in app.js.
+    // already handled by the delegated handler in app.js. The pin button
+    // instead spotlights the node on the map (the touch stand-in for hover,
+    // plus an immediate fly-to since pressing it is deliberate).
     listEl.addEventListener("click", function (event) {
+      const pinEl = event.target.closest(".node-row__pin");
+      if (pinEl) {
+        const rowEl = pinEl.closest(".node-row");
+        const nodeId = rowEl && rowEl.dataset.nodeId;
+        if (nodeId && mapView && mapView.hasNode(nodeId)) {
+          setRowActive(nodeId);
+          clearTimeout(flyTimer);
+          mapView.setHighlight(nodeId);
+          mapView.focusOn(nodeId);
+        }
+        return;
+      }
       if (event.target.closest(".node-button")) return;
       const rowEl = event.target.closest(".node-row");
       if (rowEl && rowEl.dataset.nodeId) showNodeModal(rowEl.dataset.nodeId);

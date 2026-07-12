@@ -9,9 +9,12 @@
   //
   // create(container, opts) -> view object. opts:
   //   onHover(nodeId|null)  hover enters/leaves a marker (not sent in fixed mode)
-  //   onSelect(nodeId)      marker clicked
+  //   onHighlight(nodeId)   a click/tap highlighted a marker that wasn't
+  //                         highlighted yet (not sent in fixed mode)
+  //   onSelect(nodeId)      marker clicked while already highlighted
   //   fixed: {node, position}  lock the highlight to this node at this exact
-  //          position (location modal); hover no longer moves the highlight.
+  //          position (location modal); hover no longer moves the highlight
+  //          and every click is an onSelect.
   // Tiles come from openstreetmap.org, so they need internet in the browser;
   // without it the markers still lay out on a blank background.
 
@@ -76,6 +79,19 @@
     map.on("movestart zoomstart", function () { hoverArmed = false; });
     container.addEventListener("mousemove", function () { hoverArmed = true; });
 
+    // Snapshot of the highlight when the pointer went down, taken to tell a
+    // "first tap" from a "tap while highlighted": on touch, the tap's
+    // *synthetic* mouseover fires between pointerdown and click and moves the
+    // highlight onto the tapped marker, so by click time the live highlightId
+    // always matches. pointerdown precedes that mouseover; a mouse, by
+    // contrast, hovers (and highlights) before it can ever press down.
+    let downHighlightId = null;
+    container.addEventListener(
+      window.PointerEvent ? "pointerdown" : "mousedown",
+      function () { downHighlightId = highlightId; },
+      true
+    );
+
     function positionOf(nodeId) {
       if (opts.fixed && nodeId === fixedId) return opts.fixed.position;
       const entry = markers.get(nodeId);
@@ -120,7 +136,17 @@
     }
 
     function bindMarker(marker, node) {
+      // Two-step select outside fixed mode: a marker that wasn't highlighted
+      // when the press started gets highlighted first (the touch equivalent
+      // of hovering); only a click on the already-highlighted marker opens
+      // it. With a mouse the hover has always highlighted the marker before
+      // the click, so desktop keeps its single-click open.
       marker.on("click", function () {
+        if (fixedId === null && downHighlightId !== node.node_id) {
+          applyHighlight(node.node_id);
+          if (opts.onHighlight) opts.onHighlight(node.node_id);
+          return;
+        }
         if (opts.onSelect) opts.onSelect(node.node_id);
       });
       if (fixedId === null) {
@@ -186,6 +212,15 @@
       map.flyTo(latlng, map.getZoom(), { duration: 0.8 });
     }
 
+    // Deliberate "show me this node" (the list's pin button): always centre
+    // on it, zooming in to city level if the view is wider than that but
+    // never zooming back out on someone who is already in close.
+    function focusOn(nodeId) {
+      const latlng = nodeLatLng(positionOf(nodeId));
+      if (!latlng) return;
+      map.flyTo(latlng, Math.max(map.getZoom(), 12), { duration: 0.8 });
+    }
+
     // Initial view: frame the main cluster rather than every last node -- a
     // single far-away node (wrong fix, traveller) would otherwise zoom the
     // whole mesh out to a blob. Points beyond 8x the median distance from
@@ -243,6 +278,7 @@
       setNodes,
       fitAll,
       ensureVisible,
+      focusOn,
       focusFixed,
       hasNode: function (nodeId) { return markers.has(nodeId); },
       setHighlight: function (nodeId) {

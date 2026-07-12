@@ -1459,12 +1459,26 @@ body:has(.nodes-page) main {
 }
 .node-row .node-button:hover { background: none; }
 
+/* Spotlight-on-map button; the roomy hit box matters on touch, where it is
+   the only way to highlight a node without opening its modal. */
 .node-row__pin {
   flex: 0 0 auto;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: -4px 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: none;
   color: var(--accent);
   opacity: 0.55;
+  cursor: pointer;
 }
+
+.node-row__pin:hover { opacity: 1; box-shadow: inset 0 0 0 1px var(--accent); }
 
 .node-row--active .node-row__pin { opacity: 1; }
 
