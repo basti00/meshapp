@@ -36,7 +36,8 @@
     // Hovering highlights the counterpart immediately, but the *viewport*
     // follows only after the pointer has rested for a moment: skimming rows
     // must not jerk the map around, and sweeping the pointer across markers
-    // must not jerk the list.
+    // must not jerk the list. Deliberate actions (the pin button) skip the
+    // delay.
     const REST_DELAY_MS = 500;
 
     let sortMode = "last_seen";
@@ -98,7 +99,7 @@
         subtitle: nodeSubtitle(node),
       });
       const pin = node.position
-        ? `<span class="node-row__pin" title="Position known">${PIN_SVG}</span>`
+        ? `<button type="button" class="node-row__pin" title="Show on map" aria-label="Show on map">${PIN_SVG}</button>`
         : "";
       return `<div class="node-row" data-node-id="${escapeHtml(node.node_id || "")}">${btn}${pin}</div>`;
     }
@@ -196,8 +197,22 @@
     });
 
     // Row click opens the node modal; clicks on the inner node button are
-    // already handled by the delegated handler in app.js.
+    // already handled by the delegated handler in app.js. The pin button
+    // instead spotlights the node on the map (the touch stand-in for hover,
+    // plus an immediate fly-to since pressing it is deliberate).
     listEl.addEventListener("click", function (event) {
+      const pinEl = event.target.closest(".node-row__pin");
+      if (pinEl) {
+        const rowEl = pinEl.closest(".node-row");
+        const nodeId = rowEl && rowEl.dataset.nodeId;
+        if (nodeId && mapView && mapView.hasNode(nodeId)) {
+          setRowActive(nodeId);
+          clearTimeout(flyTimer);
+          mapView.setHighlight(nodeId);
+          mapView.focusOn(nodeId);
+        }
+        return;
+      }
       if (event.target.closest(".node-button")) return;
       const rowEl = event.target.closest(".node-row");
       if (rowEl && rowEl.dataset.nodeId) showNodeModal(rowEl.dataset.nodeId);

@@ -186,6 +186,15 @@
       map.flyTo(latlng, map.getZoom(), { duration: 0.8 });
     }
 
+    // Deliberate "show me this node" (the list's pin button): always centre
+    // on it, zooming in to city level if the view is wider than that but
+    // never zooming back out on someone who is already in close.
+    function focusOn(nodeId) {
+      const latlng = nodeLatLng(positionOf(nodeId));
+      if (!latlng) return;
+      map.flyTo(latlng, Math.max(map.getZoom(), 12), { duration: 0.8 });
+    }
+
     // Initial view: frame the main cluster rather than every last node -- a
     // single far-away node (wrong fix, traveller) would otherwise zoom the
     // whole mesh out to a blob. Points beyond 8x the median distance from
@@ -243,6 +252,7 @@
       setNodes,
       fitAll,
       ensureVisible,
+      focusOn,
       focusFixed,
       hasNode: function (nodeId) { return markers.has(nodeId); },
       setHighlight: function (nodeId) {
