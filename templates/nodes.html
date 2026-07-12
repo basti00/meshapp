@@ -33,11 +33,11 @@
     const { formatMessageTime, renderNodeButton, escapeHtml, showNodeModal } = window.MeshApp;
     const SORT_KEY = "meshapp.nodeSort";
 
-    // Hovering a row highlights its marker immediately, but the map only
-    // pans to an off-screen marker after the pointer has rested on the row
-    // for a moment -- skimming or scrolling through the list must not jerk
-    // the map around.
-    const FLY_DELAY_MS = 500;
+    // Hovering highlights the counterpart immediately, but the *viewport*
+    // follows only after the pointer has rested for a moment: skimming rows
+    // must not jerk the map around, and sweeping the pointer across markers
+    // must not jerk the list.
+    const REST_DELAY_MS = 500;
 
     let sortMode = "last_seen";
     try {
@@ -131,16 +131,23 @@
     let mapView = null;
     let listHoverArmed = true; // false while a map-driven smooth scroll may
                                // slide rows under a stationary pointer
+    let listScrollTimer = null;
+
+    function scrollRowIntoView(nodeId) {
+      const rowEl = listEl.querySelector(`.node-row[data-node-id="${CSS.escape(nodeId)}"]`);
+      if (rowEl) {
+        listHoverArmed = false;
+        rowEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }
+
     if (window.MeshMap) {
       mapView = window.MeshMap.create(mapEl, {
         onHover: function (nodeId) {
           setRowActive(nodeId);
+          clearTimeout(listScrollTimer);
           if (nodeId === null) return;
-          const rowEl = listEl.querySelector(`.node-row[data-node-id="${CSS.escape(nodeId)}"]`);
-          if (rowEl) {
-            listHoverArmed = false;
-            rowEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          }
+          listScrollTimer = setTimeout(function () { scrollRowIntoView(nodeId); }, REST_DELAY_MS);
         },
         onSelect: function (nodeId) { showNodeModal(nodeId); },
       });
@@ -165,7 +172,7 @@
       clearTimeout(flyTimer);
       if (mapView.hasNode(nodeId)) {
         mapView.setHighlight(nodeId);
-        flyTimer = setTimeout(function () { mapView.ensureVisible(nodeId); }, FLY_DELAY_MS);
+        flyTimer = setTimeout(function () { mapView.ensureVisible(nodeId); }, REST_DELAY_MS);
       } else {
         mapView.clearHighlight();
       }
