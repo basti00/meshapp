@@ -36,8 +36,8 @@
     // Hovering highlights the counterpart immediately, but the *viewport*
     // follows only after the pointer has rested for a moment: skimming rows
     // must not jerk the map around, and sweeping the pointer across markers
-    // must not jerk the list. Deliberate actions (the pin button) skip the
-    // delay.
+    // must not jerk the list. Deliberate actions (pin button, marker tap)
+    // skip the delay.
     const REST_DELAY_MS = 500;
 
     let sortMode = "last_seen";
@@ -149,6 +149,14 @@
           clearTimeout(listScrollTimer);
           if (nodeId === null) return;
           listScrollTimer = setTimeout(function () { scrollRowIntoView(nodeId); }, REST_DELAY_MS);
+        },
+        // First tap on a not-yet-highlighted marker (touch flow): mirror the
+        // highlight into the list right away -- a tap is deliberate, so no
+        // rest delay.
+        onHighlight: function (nodeId) {
+          setRowActive(nodeId);
+          clearTimeout(listScrollTimer);
+          scrollRowIntoView(nodeId);
         },
         onSelect: function (nodeId) { showNodeModal(nodeId); },
       });
