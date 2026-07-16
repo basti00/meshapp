@@ -559,6 +559,8 @@ body:has(.messages-page) main {
    column; the cap keeps long messages at a readable measure. */
 .msg-row .bubble { flex: 0 1 auto; min-width: 0; max-width: 640px; }
 
+/* Flat at rest -- the hairline border alone separates a bubble from the
+   background; the shadow is reserved for hover so the list stays calm. */
 .bubble {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -567,7 +569,6 @@ body:has(.messages-page) main {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  box-shadow: var(--shadow);
 }
 
 .bubble--clickable {
@@ -577,7 +578,7 @@ body:has(.messages-page) main {
 
 .bubble--clickable:hover {
   background: var(--panel-hover);
-  box-shadow: var(--shadow-strong);
+  box-shadow: var(--shadow);
 }
 
 .bubble--clickable:focus-visible {
@@ -695,7 +696,6 @@ body:has(.messages-page) main {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 999px;
-  box-shadow: var(--shadow);
   cursor: pointer;
   line-height: 1;
   transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
@@ -704,7 +704,7 @@ body:has(.messages-page) main {
 .tapback:hover {
   border-color: var(--accent);
   background: var(--panel-hover);
-  box-shadow: var(--shadow-strong);
+  box-shadow: var(--shadow);
 }
 
 .tapback:focus-visible {
@@ -751,7 +751,6 @@ body:has(.messages-page) main {
 .bubble--placeholder {
   background: var(--panel-hover);
   border-style: dashed;
-  box-shadow: none;
   opacity: 0.75;
   font-style: italic;
   align-self: flex-start;
