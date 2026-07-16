@@ -1342,8 +1342,12 @@ button.msg-quote:hover .msg-quote__go { color: var(--accent); }
   .site-header { padding: 12px 14px; }
   .site-header .title { font-size: 18px; }
 
+  /* The nav already highlights "Messages"; the h1 repeats it, so on phones
+     it makes way for another bubble and the tabs become the toolbar. */
+  .messages-toolbar__top { display: none; }
+  .messages-toolbar .channel-tabs { margin-bottom: 8px; }
+
   /* Scale message bubbles and text ~10% smaller to fit more on screen. */
-  .messages-page h1 { font-size: clamp(17px, 5vw, 20px); }
   .message-list { padding: 4px 4px calc(6px + env(safe-area-inset-bottom)); }
   .msg-tree { gap: 14px; }
   .msg-node,
