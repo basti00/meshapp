@@ -139,9 +139,12 @@
         : `<div class="bubble__body bubble__body--meta"><span class="tag">${escapeHtml(msg.portnum || "unknown")}</span></div>`;
     }
 
-    // Colours the name in the avatar's background colour.
+    // Colours the name with the avatar's hue, blended toward the theme's
+    // text colour -- the raw pastels (light greens especially) are barely
+    // legible on a white panel, and the blend adapts to both themes.
     function nameStyle(msg) {
-      return msg.avatar_bg ? ` style="${escapeHtml(`color: ${msg.avatar_bg}`)}"` : "";
+      if (!msg.avatar_bg) return "";
+      return ` style="${escapeHtml(`color: color-mix(in srgb, ${msg.avatar_bg} 60%, var(--text))`)}"`;
     }
 
     // Builds the standard message bubble. The avatar sits in a left column;
