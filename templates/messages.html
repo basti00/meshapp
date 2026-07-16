@@ -86,6 +86,32 @@
     }
 
     // ---------- Shared rendering helpers ----------
+    const pad2 = function (n) { return String(n).padStart(2, "0"); };
+
+    function dayKey(epochSeconds) {
+      const d = new Date(epochSeconds * 1000);
+      return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    }
+
+    function formatDayLabel(epochSeconds) {
+      const d = new Date(epochSeconds * 1000);
+      const opts = { weekday: "short", day: "numeric", month: "short" };
+      if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+      return d.toLocaleDateString(undefined, opts);
+    }
+
+    // Time as shown in a bubble header: messages under their own day's
+    // separator carry just HH:MM; a message resurfacing under a newer
+    // separator (old thread pulled down by a fresh reply) keeps its date.
+    function formatBubbleTime(rxTime, treeDay) {
+      const t = Number(rxTime) || 0;
+      if (t && treeDay && dayKey(t) === treeDay) {
+        const d = new Date(t * 1000);
+        return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+      }
+      return formatMessageTime(rxTime);
+    }
+
     // RSSI/SNR are tagged so narrow screens can drop them (the full numbers
     // live in the message detail modal); hops stays as the one inline signal.
     function renderMeta(msg) {
@@ -121,7 +147,7 @@
     // Builds the standard message bubble. The avatar sits in a left column;
     // the name+time row, text and signal meta stack to its right (compact
     // chat layout that drops the avatar-tall header overhang).
-    function buildBubble(msg) {
+    function buildBubble(msg, treeDay) {
       const messageId = msg.id !== null && msg.id !== undefined ? msg.id : "";
       const name = msg.long_name || msg.short_name || msg.from_id || "-";
       const nodeId = msg.from_id ? ` data-node-id="${escapeHtml(msg.from_id)}"` : "";
@@ -142,7 +168,7 @@
               <button type="button" class="node-button bubble__name"${nodeId}><span class="node-name"${nameStyle(msg)}>${escapeHtml(name)}</span></button>
               <span class="bubble__info">
                 ${metaHtml}
-                <time class="bubble__time" datetime="${escapeHtml(msg.rx_time || '')}">${escapeHtml(formatMessageTime(msg.rx_time))}</time>
+                <time class="bubble__time" datetime="${escapeHtml(msg.rx_time || '')}">${escapeHtml(formatBubbleTime(msg.rx_time, treeDay))}</time>
               </span>
             </header>
             ${bubbleBody(msg)}
@@ -233,14 +259,14 @@
           return String(a.id).localeCompare(String(b.id));
         });
       },
-      renderNode: function (node, rendered) {
+      renderNode: function (node, rendered, treeDay) {
         if (rendered.has(node)) return "";
         rendered.add(node);
-        const inner = node.placeholder ? this.placeholderBubble(node) : buildBubble(node.msg);
+        const inner = node.placeholder ? this.placeholderBubble(node) : buildBubble(node.msg, treeDay);
         const tapbacksHtml = renderTapbackRow(node.tapbacks);
         const self = this;
         const kids = this.sortNodes(node.children).map(function (c) {
-          return self.renderNode(c, rendered);
+          return self.renderNode(c, rendered, treeDay);
         }).join("");
         const childrenHtml = kids ? `<div class="msg-node__children">${kids}</div>` : "";
         return `<div class="msg-node">${inner}${tapbacksHtml}${childrenHtml}</div>`;
@@ -296,10 +322,24 @@
         const self = this;
         // Return one segment per top-level tree, each with a stable key (the
         // root node's id), so the DOM can be reconciled tree-by-tree instead
-        // of rebuilt wholesale -- see reconcileTrees().
-        return this.sortNodes(roots).map(function (r) {
-          return { key: String(r.id), html: self.renderNode(r, rendered) };
+        // of rebuilt wholesale -- see reconcileTrees(). A day separator
+        // segment is inserted whenever the activity day (tree recency, which
+        // also drives the ordering, so days never repeat) rolls over.
+        const segments = [];
+        let lastDay = null;
+        this.sortNodes(roots).forEach(function (r) {
+          const rec = self.recency(r);
+          const day = rec ? dayKey(rec) : lastDay;
+          if (day && day !== lastDay) {
+            segments.push({
+              key: "day-" + day,
+              html: `<div class="day-sep">${escapeHtml(formatDayLabel(rec))}</div>`,
+            });
+            lastDay = day;
+          }
+          segments.push({ key: String(r.id), html: self.renderNode(r, rendered, day) });
         });
+        return segments;
       },
     };
 
