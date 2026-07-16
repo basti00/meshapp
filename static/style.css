@@ -690,7 +690,7 @@ body:has(.messages-page) main {
   flex-wrap: wrap;
   justify-content: flex-start;
   gap: 6px;
-  margin-top: -22px;
+  margin-top: -20px; /* 12px overlap against the 8px msg-node gap */
   padding-left: 68px;
   position: relative;
   z-index: 1;
@@ -763,11 +763,16 @@ body:has(.messages-page) main {
 .msg-node__children {
   display: flex;
   flex-direction: column;
-  gap: 10px;
   /* Without this, a non-wrapping body (e.g. a long URL) stretches the column
      wider than the viewport, pushing every row's timestamp off-screen. */
   min-width: 0;
 }
+
+/* Rhythm: unrelated conversations sit further apart than a message and its
+   replies, so tree boundaries read at a glance. */
+.msg-tree { gap: 18px; }
+.msg-node,
+.msg-node__children { gap: 8px; }
 
 /* Each reply depth indents and gains a connecting rail. */
 .msg-node__children {
@@ -1339,7 +1344,11 @@ button.msg-quote:hover .msg-quote__go { color: var(--accent); }
 
   /* Scale message bubbles and text ~10% smaller to fit more on screen. */
   .messages-page h1 { font-size: clamp(17px, 5vw, 20px); }
-  .message-list { gap: 6px; padding: 4px 4px calc(6px + env(safe-area-inset-bottom)); }
+  .message-list { padding: 4px 4px calc(6px + env(safe-area-inset-bottom)); }
+  .msg-tree { gap: 14px; }
+  .msg-node,
+  .msg-node__children { gap: 6px; }
+  .tapback-row { margin-top: -18px; }
   .msg-row { gap: 8px; }
   .bubble { padding: 7px 10px; gap: 2px; border-radius: 12px; }
   .bubble__body { font-size: 13.5px; }
