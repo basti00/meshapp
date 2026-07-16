@@ -636,7 +636,10 @@ body:has(.messages-page) main {
 
 .bubble__body--meta { font-size: 13px; }
 
-/* Items pack to the right; overflow spills off the left edge and is clipped. */
+/* Items pack to the right; overflow spills off the left edge, fading out
+   through the mask instead of clipping glyphs mid-character. The left
+   padding matches the fade zone so fully-fitting content sits past it and
+   only genuinely overflowing content runs into the fade. */
 .bubble__meta {
   display: flex;
   flex: 0 1 auto;
@@ -645,13 +648,18 @@ body:has(.messages-page) main {
   gap: 8px;
   overflow: hidden;
   white-space: nowrap;
+  padding-left: 20px;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 20px);
+  mask-image: linear-gradient(to right, transparent 0, #000 20px);
 }
 
 .bubble__meta span { flex: 0 0 auto; }
 
-.bubble__meta span + span::before {
+/* Separator dot as ::after on every span but the last: a span hidden or
+   clipped away takes its own dot with it, so no stray leading dots. */
+.bubble__meta span:not(:last-child)::after {
   content: "·";
-  margin-right: 8px;
+  margin-left: 8px;
   opacity: 0.6;
 }
 
@@ -1327,6 +1335,9 @@ button.msg-quote:hover .msg-quote__go { color: var(--accent); }
   .msg-quote__label { font-size: 10px; }
   .msg-node__children { margin-left: 12px; padding-left: 12px; }
   .tapback-row { padding-left: 56px; }
+  /* Drop RSSI/SNR inline on phones -- they crowded the header line; the
+     detail modal keeps the full numbers. Hops stays. */
+  .bubble__meta-sig { display: none; }
 }
 
 @media (max-width: 560px) {

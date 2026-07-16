@@ -86,13 +86,15 @@
     }
 
     // ---------- Shared rendering helpers ----------
+    // RSSI/SNR are tagged so narrow screens can drop them (the full numbers
+    // live in the message detail modal); hops stays as the one inline signal.
     function renderMeta(msg) {
       const parts = [];
       if (msg.rx_rssi !== null && msg.rx_rssi !== undefined) {
-        parts.push(`<span>${escapeHtml(formatValue(msg.rx_rssi))} dBm</span>`);
+        parts.push(`<span class="bubble__meta-sig">${escapeHtml(formatValue(msg.rx_rssi))} dBm</span>`);
       }
       if (msg.rx_snr !== null && msg.rx_snr !== undefined) {
-        parts.push(`<span>SNR ${escapeHtml(formatValue(msg.rx_snr))}</span>`);
+        parts.push(`<span class="bubble__meta-sig">SNR ${escapeHtml(formatValue(msg.rx_snr))}</span>`);
       }
       if (msg.hops !== null && msg.hops !== undefined) {
         const label = Number(msg.hops) === 1 ? "hop" : "hops";
