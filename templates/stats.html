@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Stats · Meshapp{% endblock %}
+{% block content %}
+<div class="stats-page">
+  <div class="page-controls">
+    <h1>Stats</h1>
+    <div class="page-controls__group">
+      <label class="sort-control">
+        <span>Range</span>
+        <select id="stats-range">
+          <option value="3d">3 days</option>
+          <option value="week">Week</option>
+          <option value="month">Month</option>
+          <option value="year">Year</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div class="stats-tiles" id="stats-tiles">
+    <div class="card stat-tile">
+      <span class="stat-tile__label">Active nodes</span>
+      <span class="stat-tile__value" id="stat-nodes">–</span>
+    </div>
+    <div class="card stat-tile">
+      <span class="stat-tile__label">Messages</span>
+      <span class="stat-tile__value" id="stat-messages">–</span>
+    </div>
+    <div class="card stat-tile">
+      <span class="stat-tile__label">Frames</span>
+      <span class="stat-tile__value" id="stat-frames">–</span>
+    </div>
+  </div>
+
+  <div class="card stats-card">
+    <div class="stats-card__head">
+      <h2>Online nodes</h2>
+      <span class="stats-card__sub muted" data-bucket-label></span>
+    </div>
+    <div class="chart" id="chart-online" data-metric="online"></div>
+  </div>
+
+  <div class="card stats-card">
+    <div class="stats-card__head">
+      <h2>Messages</h2>
+      <span class="stats-card__sub muted" data-bucket-label></span>
+    </div>
+    <div class="chart" id="chart-messages" data-metric="messages"></div>
+  </div>
+
+  <div class="card stats-card">
+    <div class="stats-card__head">
+      <h2>Frames</h2>
+      <span class="stats-card__sub muted" data-bucket-label></span>
+    </div>
+    <div class="chart" id="chart-frames" data-metric="frames"></div>
+  </div>
+
+  <div class="stats-pies">
+    <div class="card stats-card">
+      <div class="stats-card__head">
+        <h2>Messages by node</h2>
+        <span class="stats-card__sub muted" data-range-label></span>
+      </div>
+      <div class="pie" id="pie-messages"></div>
+    </div>
+    <div class="card stats-card">
+      <div class="stats-card__head">
+        <h2>Frames by node</h2>
+        <span class="stats-card__sub muted" data-range-label></span>
+      </div>
+      <div class="pie" id="pie-frames"></div>
+    </div>
+  </div>
+</div>
+
+<div class="chart-tooltip" id="chart-tooltip" role="status" hidden></div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='stats.js') }}"></script>
+{% endblock %}

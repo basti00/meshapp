@@ -28,6 +28,7 @@
       <nav class="primary-nav">
         <a href="{{ url_for('messages_default') }}" class="{% if request.path.startswith('/messages') or request.path == '/' %}active{% endif %}">Messages</a>
         <a href="{{ url_for('nodes') }}" class="{% if request.path.startswith('/nodes') %}active{% endif %}">Nodes</a>
+        <a href="{{ url_for('stats') }}" class="{% if request.path.startswith('/stats') %}active{% endif %}">Stats</a>
       </nav>
       <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">
         <span class="icon-light" aria-hidden="true">☾</span>
