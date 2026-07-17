@@ -12,12 +12,24 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 from meshtastic.serial_interface import SerialInterface
 from pubsub import pub
 
-DB_SCHEMA_VERSION = 11
+DB_SCHEMA_VERSION = 12
 DB_PATH = Path(__file__).with_name("meshapp.db")
 DEVICE_PATH = os.environ.get("MESH_DEVICE", "/dev/ttyACM0")
 DEFAULT_CHANNEL_INDEX = int(os.environ.get("MESH_CHANNEL", "0"))
 AUTO_REFRESH_SECONDS = int(os.environ.get("MESH_AUTO_REFRESH", "10"))
 LISTEN_RETRY_SECONDS = 5
+
+# Statistics materialisation: activity is pre-aggregated into stats_blocks,
+# one row per (1h block, node). This is the coarsest shape that can still
+# answer every stats view without re-scanning messages/frames: coarser bars
+# are whole 1h blocks summed at query time, "online nodes" needs the per-node
+# split (COUNT(DISTINCT) cannot be pre-summed per bucket), and the per-node
+# pies are a GROUP BY node over the same rows. 1h blocks also let day-sized
+# bars align to local midnight for whole-hour timezones.
+STATS_BLOCK_SECONDS = 3600
+# Stats are not real-time critical: refresh at most this often, on demand.
+STATS_REFRESH_SECONDS = int(os.environ.get("MESH_STATS_REFRESH", "300"))
+STATS_SERIES_MAX_BUCKETS = 400
 
 PING_KEYWORDS = ("PING",)
 
@@ -433,6 +445,28 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(channel_key, thread_root)"
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes(last_seen DESC)")
+        # Plain rx_time indexes back the stats refresh scan and the
+        # time-range drill-down lists (the composite indexes above all lead
+        # with node/channel and cannot serve a bare time-range query).
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(rx_time)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_frames_time ON frames(rx_time)")
+        # Materialised activity blocks (see STATS_BLOCK_SECONDS). WITHOUT
+        # ROWID keeps it a clustered (block_start, node_id) b-tree: range
+        # scans by time are sequential and there is no rowid overhead.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS stats_blocks (
+                block_start INTEGER NOT NULL,
+                node_id TEXT NOT NULL,
+                msg_count INTEGER NOT NULL DEFAULT 0,
+                frame_count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (block_start, node_id)
+            ) WITHOUT ROWID
+            """
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS stats_meta (key TEXT PRIMARY KEY, value INTEGER)"
+        )
         # One-time backfill for pre-frames databases (fresh DBs start at 0 and
         # have nothing to migrate). Stamped v11 below, so it never re-runs.
         if 0 < old_version < 11:
@@ -1851,6 +1885,243 @@ def channel_detail_api(channel_key):
         "derived": _pick(channel, _CHANNEL_DERIVED_KEYS),
     }
     return jsonify({"channel": channel})
+
+
+# ---------------------------------------------------------------------------
+# Statistics
+#
+# All stats views read from stats_blocks (see init_db), refreshed lazily by
+# the endpoints below: at most every STATS_REFRESH_SECONDS, blocks from the
+# last refresh point onward are recomputed wholesale (DELETE + re-aggregate),
+# which is idempotent and needs no ingest-path hooks. The first refresh on a
+# database with history backfills everything in one pass.
+
+_stats_lock = threading.Lock()
+_stats_refreshed_at = 0.0
+
+
+def _refresh_stats():
+    global _stats_refreshed_at
+    if time.time() - _stats_refreshed_at < STATS_REFRESH_SECONDS:
+        return
+    with _stats_lock:
+        if time.time() - _stats_refreshed_at < STATS_REFRESH_SECONDS:
+            return
+        with _db_connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM stats_meta WHERE key = 'agg_until'"
+            ).fetchone()
+            agg_until = row["value"] if row else 0
+            # Recompute from one block before the last refresh point: rows
+            # committed while the previous refresh was reading land safely
+            # inside the margin. Blocks are rebuilt whole, so this never
+            # double-counts.
+            boundary = max(0, agg_until - STATS_BLOCK_SECONDS)
+            boundary -= boundary % STATS_BLOCK_SECONDS
+            cutoff = int(time.time())
+            conn.execute("DELETE FROM stats_blocks WHERE block_start >= ?", (boundary,))
+            conn.execute(
+                """
+                INSERT INTO stats_blocks (block_start, node_id, msg_count, frame_count)
+                SELECT block_start, node_id, SUM(msg), SUM(frame)
+                FROM (
+                    SELECT (rx_time / :block) * :block AS block_start,
+                           from_id AS node_id, 1 AS msg, 0 AS frame
+                    FROM messages
+                    WHERE rx_time >= :lo AND from_id IS NOT NULL
+                    UNION ALL
+                    SELECT (rx_time / :block) * :block,
+                           node_id, 0, 1
+                    FROM frames
+                    WHERE rx_time >= :lo AND node_id IS NOT NULL
+                )
+                GROUP BY block_start, node_id
+                """,
+                {"block": STATS_BLOCK_SECONDS, "lo": boundary},
+            )
+            conn.execute(
+                "INSERT INTO stats_meta (key, value) VALUES ('agg_until', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (cutoff,),
+            )
+            conn.commit()
+        _stats_refreshed_at = time.time()
+
+
+def _stats_tz_offset():
+    """Client UTC offset in seconds (east positive), snapped to whole hours
+    so bucket boundaries stay aligned with the 1h blocks."""
+    tz = _coerce_int(request.args.get("tz")) or 0
+    tz = max(-14 * 3600, min(14 * 3600, tz))
+    return round(tz / 3600) * 3600
+
+
+def _stats_range_args():
+    start = _coerce_int(request.args.get("start"))
+    end = _coerce_int(request.args.get("end"))
+    if start is None or end is None or end <= start:
+        return None
+    return start, end
+
+
+@app.route("/stats")
+def stats():
+    return render_template("stats.html")
+
+
+@app.route("/api/stats/series")
+def stats_series_api():
+    """Bucketed activity counts, newest page by default; `before` (a bucket
+    start) pages older buckets for the lazy-scrolling x axis. Buckets are
+    returned dense (zero-filled), ascending, `bucket` seconds wide, aligned
+    to the client's whole-hour tz offset."""
+    _refresh_stats()
+    bucket = _coerce_int(request.args.get("bucket")) or 3 * 3600
+    bucket = max(STATS_BLOCK_SECONDS, min(bucket, 42 * 86400))
+    bucket -= bucket % STATS_BLOCK_SECONDS
+    tz = _stats_tz_offset()
+    limit = _coerce_int(request.args.get("limit")) or 120
+    limit = max(1, min(limit, STATS_SERIES_MAX_BUCKETS))
+    before = _coerce_int(request.args.get("before"))
+    if before is None:
+        # Include the (partial) bucket containing "now".
+        end = ((int(time.time()) + tz) // bucket + 1) * bucket - tz
+    else:
+        end = ((before + tz) // bucket) * bucket - tz
+    start = end - limit * bucket
+    with _db_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT (block_start + :tz) / :bucket AS b,
+                   COUNT(DISTINCT node_id) AS online,
+                   SUM(msg_count) AS messages,
+                   SUM(frame_count) AS frames
+            FROM stats_blocks
+            WHERE block_start >= :start AND block_start < :end
+            GROUP BY b
+            """,
+            {"tz": tz, "bucket": bucket, "start": start, "end": end},
+        ).fetchall()
+        data_start = conn.execute("SELECT MIN(block_start) FROM stats_blocks").fetchone()[0]
+    by_index = {row["b"]: row for row in rows}
+    buckets = []
+    for index in range((start + tz) // bucket, (end + tz) // bucket):
+        row = by_index.get(index)
+        buckets.append(
+            {
+                "start": index * bucket - tz,
+                "online": row["online"] if row else 0,
+                "messages": row["messages"] if row else 0,
+                "frames": row["frames"] if row else 0,
+            }
+        )
+    return jsonify(
+        {
+            "bucket": bucket,
+            "tz": tz,
+            "start": start,
+            "end": end,
+            "buckets": buckets,
+            "data_start": data_start,
+        }
+    )
+
+
+@app.route("/api/stats/range/nodes")
+def stats_range_nodes_api():
+    """Per-node activity totals within [start, end) — feeds the pie charts
+    and the per-bar node drill-down. Bounded by the node count, so it is not
+    paginated."""
+    _refresh_stats()
+    time_range = _stats_range_args()
+    if time_range is None:
+        return jsonify({"error": "start/end required"}), 400
+    with _db_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT s.node_id,
+                   SUM(s.msg_count) AS messages,
+                   SUM(s.frame_count) AS frames,
+                   n.short_name, n.long_name, n.hw_model, n.last_seen
+            FROM stats_blocks s
+            LEFT JOIN nodes n ON n.node_id = s.node_id
+            WHERE s.block_start >= ? AND s.block_start < ?
+            GROUP BY s.node_id
+            ORDER BY SUM(s.msg_count) + SUM(s.frame_count) DESC, s.node_id
+            """,
+            time_range,
+        ).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item.update(_node_avatar_colors(item.get("node_id")))
+        items.append(item)
+    return jsonify({"nodes": items})
+
+
+@app.route("/api/stats/range/messages")
+def stats_range_messages_api():
+    """Messages within [start, end), keyset-paged like the node modal lists.
+    Reads the live table, so a message that arrived after the last stats
+    refresh can appear here before its bar catches up — harmless."""
+    time_range = _stats_range_args()
+    if time_range is None:
+        return jsonify({"error": "start/end required"}), 400
+    before = _parse_cursor(request.args.get("before"))
+    where_sql, where_params = _keyset_where(before)
+    with _db_connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT m.id, m.rx_time, m.from_id, m.text, m.emoji, m.portnum,
+                   m.channel_index, m.channel_key, n.short_name, n.long_name
+            FROM messages m
+            LEFT JOIN nodes n ON n.node_id = m.from_id
+            WHERE m.rx_time >= ? AND m.rx_time < ?{where_sql}
+            ORDER BY m.rx_time DESC, m.id DESC
+            LIMIT ?
+            """,
+            (*time_range, *where_params, NODE_LIST_PAGE_SIZE),
+        ).fetchall()
+    config = _get_channels_config()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["is_tapback"] = bool(item.get("emoji"))
+        item["channel_label"] = _channel_label_for_key(item.get("channel_key"), config)
+        item.update(_node_avatar_colors(item.get("from_id")))
+        items.append(item)
+    return jsonify({"messages": items, "next_cursor": _keyset_page(rows, NODE_LIST_PAGE_SIZE)})
+
+
+@app.route("/api/stats/range/frames")
+def stats_range_frames_api():
+    """Frames within [start, end), keyset-paged (see messages above)."""
+    time_range = _stats_range_args()
+    if time_range is None:
+        return jsonify({"error": "start/end required"}), 400
+    before = _parse_cursor(request.args.get("before"))
+    where_sql, where_params = _keyset_where(before)
+    with _db_connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT f.id, f.rx_time, f.node_id, f.frame_type, f.portnum,
+                   f.channel_index, f.channel_key, n.short_name, n.long_name
+            FROM frames f
+            LEFT JOIN nodes n ON n.node_id = f.node_id
+            WHERE f.rx_time >= ? AND f.rx_time < ?{where_sql}
+            ORDER BY f.rx_time DESC, f.id DESC
+            LIMIT ?
+            """,
+            (*time_range, *where_params, NODE_LIST_PAGE_SIZE),
+        ).fetchall()
+    config = _get_channels_config()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["channel_label"] = _channel_label_for_key(item.get("channel_key"), config)
+        item.update(_node_avatar_colors(item.get("node_id")))
+        items.append(item)
+    return jsonify({"frames": items, "next_cursor": _keyset_page(rows, NODE_LIST_PAGE_SIZE)})
 
 
 app.jinja_env.filters["datetime"] = _format_time
