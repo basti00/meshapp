@@ -1239,6 +1239,9 @@
     showMessageModal,
     showChannelModal,
     showFrameModal,
+    pushModal,
+    initLazyList,
+    lazyListHtml,
     isLive,
     LIVE_THRESHOLD_SECONDS,
   };
